@@ -233,7 +233,8 @@ def cmd_run(args):
     setup_prefix(prefix, args.backend, env)
     os.chdir(workdir)
     wine = str(runtime(args.backend) / "bin/wine")
-    os.execve(wine, [wine, "steam.exe", "Z:" + str(exe).replace("/", "\\"), *launch_args, *args.args], env)
+    # an explicit path makes wine load steam.exe directly; via start.exe its wait for all processes deadlocks
+    os.execve(wine, [wine, "C:\\windows\\system32\\steam.exe", "Z:" + str(exe).replace("/", "\\"), *launch_args, *args.args], env)
 
 
 def cmd_wine(args):
