@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TEAM_ID=${NEUTRON_TEAM_ID:-YNRVHH9NWL}
 NOTARY_PROFILE=${NEUTRON_NOTARY_PROFILE:-neutron}
-VERSION=${NEUTRON_VERSION:-0.2.0}
+VERSION=${NEUTRON_VERSION:-0.2.1}
 BUILD=${NEUTRON_BUILD:-$(git -C "$ROOT" rev-list --count HEAD)}
 FEED_URL="https://github.com/OmniTroid/neutron/releases/download/updates/appcast.xml"
 SPARKLE_PUBLIC_KEY="itatJhi2cn8+3UPw9dscTpQ8D84gG/65k4hGGZPet3s="
