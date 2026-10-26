@@ -5,6 +5,7 @@ public struct SteamGame: Identifiable, Hashable, Sendable {
     public let appID: UInt32
     public let name: String
     public let hasMacVersion: Bool
+    public let installSize: Int64?
     let iconHash: String?
 
     public var id: UInt32 { appID }
@@ -43,11 +44,13 @@ public enum SteamLibrary {
             let common = info["common"]
             guard owned.contains(appID),
                   common?["type"]?.text?.lowercased() == "game",
-                  AppInfo.windowsLaunch(info) != nil,
+                  let launch = AppInfo.windowsLaunch(info),
                   let name = common?["name"]?.text
             else { return nil }
+            let is64Bit = launch["config"]?["osarch"]?.text != "32"
             return SteamGame(appID: appID, name: name,
                              hasMacVersion: common?["oslist"]?.text?.contains("macos") ?? false,
+                             installSize: AppInfo.windowsInstallSize(info, is64Bit: is64Bit),
                              iconHash: common?["icon"]?.text ?? common?["clienticon"]?.text)
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

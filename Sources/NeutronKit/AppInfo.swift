@@ -179,4 +179,26 @@ public enum AppInfo {
         }
         return entries.enumerated().min { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }?.element
     }
+
+    /// Bytes on disk for the depots a Windows install downloads: matching OS, architecture and
+    /// language, skipping low-violence and DLC depots; nil if Steam lists no sizes.
+    public static func windowsInstallSize(_ appInfo: KeyValue, is64Bit: Bool) -> Int64? {
+        var total: Int64 = 0
+        var found = false
+        for (_, depot) in appInfo["depots"]?.children ?? [] {
+            guard let size = depot["manifests"]?["public"]?["size"]?.text.flatMap({ Int64($0) }) else { continue }
+            let config = depot["config"]
+            let oslist = config?["oslist"]?.text ?? ""
+            let osarch = config?["osarch"]?.text ?? ""
+            let language = config?["language"]?.text ?? ""
+            guard oslist.isEmpty || oslist.contains("windows"),
+                  osarch.isEmpty || osarch == (is64Bit ? "64" : "32"),
+                  language.isEmpty || language == "english",
+                  config?["lowviolence"] == nil,
+                  depot["dlcappid"] == nil else { continue }
+            total += size
+            found = true
+        }
+        return found ? total : nil
+    }
 }

@@ -202,3 +202,34 @@ struct CloudSavesTests {
         #expect(CloudSaves.links(for: peak).first?.macPath == "unity.LandCrab.PEAK")
     }
 }
+
+struct InstallSizeTests {
+    func depot(_ size: Int64, _ config: [(key: String, value: KeyValue)] = [], dlc: Bool = false) -> KeyValue {
+        var pairs: [(key: String, value: KeyValue)] = [("manifests", .object([("public", .object([("size", .string(String(size)))]))]))]
+        if !config.isEmpty { pairs.append(("config", .object(config))) }
+        if dlc { pairs.append(("dlcappid", .string("123"))) }
+        return .object(pairs)
+    }
+
+    @Test func sumsMatchingWindowsDepots() {
+        let app: KeyValue = .object([("depots", .object([
+            ("1", depot(1000)),
+            ("2", depot(200, [("oslist", .string("windows")), ("osarch", .string("64"))])),
+            ("3", depot(50, [("oslist", .string("windows")), ("osarch", .string("32"))])),
+            ("4", depot(70, [("oslist", .string("macos"))])),
+            ("5", depot(30, [("language", .string("german"))])),
+            ("6", depot(10, [("lowviolence", .string("1"))])),
+            ("7", depot(5, dlc: true)),
+            ("branches", .object([("public", .object([("buildid", .string("1"))]))])),
+        ]))])
+        #expect(AppInfo.windowsInstallSize(app, is64Bit: true) == 1200)
+        #expect(AppInfo.windowsInstallSize(app, is64Bit: false) == 1050)
+        #expect(AppInfo.windowsInstallSize(.object([]), is64Bit: true) == nil)
+    }
+
+    @Test(.enabled(if: FileManager.default.fileExists(atPath: Paths.steamAppInfo.path)))
+    func peakSizeFromLocalSteamCache() throws {
+        let peak = try #require(try AppInfo.read(appID: 3527290))
+        #expect(AppInfo.windowsInstallSize(peak, is64Bit: true) == 16_440_905_716)
+    }
+}

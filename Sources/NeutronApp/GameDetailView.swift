@@ -97,6 +97,8 @@ struct GameDetailView: View {
 
             if installed {
                 stat("Size on disk", sizeOnDisk.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "—")
+            } else if let size = game.installSize {
+                stat("Download size", ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
             }
             stat("Graphics", model.backend(for: game) == .dxmt ? "DXMT · Metal" : "wined3d · OpenGL")
             if game.hasMacVersion {
