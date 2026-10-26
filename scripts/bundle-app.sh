@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds build/Neutron.app (with the Wine runtime) and build/Neutron.dmg.
+# Builds build/Neutron.app (with the Wine runtime) and build/Neutron.dmg, versioned $NEUTRON_VERSION.
 # Signs with the "Developer ID Application" certificate of $NEUTRON_TEAM_ID when it is in the keychain
 # (ad-hoc otherwise), and notarizes when the notarytool keychain profile $NEUTRON_NOTARY_PROFILE exists.
 set -euo pipefail
@@ -7,6 +7,10 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TEAM_ID=${NEUTRON_TEAM_ID:-YNRVHH9NWL}
 NOTARY_PROFILE=${NEUTRON_NOTARY_PROFILE:-neutron}
+VERSION=${NEUTRON_VERSION:-0.1}
+BUILD=${NEUTRON_BUILD:-$(git -C "$ROOT" rev-list --count HEAD)}
+FEED_URL="https://github.com/OmniTroid/neutron/releases/download/updates/appcast.xml"
+SPARKLE_PUBLIC_KEY="itatJhi2cn8+3UPw9dscTpQ8D84gG/65k4hGGZPet3s="
 APP="$ROOT/build/Neutron.app"
 DMG="$ROOT/build/Neutron.dmg"
 ICONSET="$ROOT/build/AppIcon.iconset"
@@ -17,8 +21,10 @@ swift build -c release --product NeutronApp --package-path "$ROOT"
 swift build -c release --product neutron --package-path "$ROOT"
 
 rm -rf "$APP" "$ICONSET" "$DMG"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources" "$APP/Contents/SharedSupport" "$ICONSET"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources" "$APP/Contents/SharedSupport" \
+    "$APP/Contents/Frameworks" "$ICONSET"
 cp "$ROOT/.build/release/NeutronApp" "$APP/Contents/MacOS/Neutron"
+ditto "$ROOT/.build/out/Products/Release/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 cp "$ROOT/.build/release/neutron" "$APP/Contents/Helpers/neutron"
 ditto "$ROOT/dist" "$APP/Contents/SharedSupport/dist"
 
@@ -40,8 +46,11 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key><string>Neutron</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundleShortVersionString</key><string>0.1</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD</string>
+    <key>SUFeedURL</key><string>$FEED_URL</string>
+    <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
+    <key>SUEnableAutomaticChecks</key><true/>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
     <key>NSHighResolutionCapable</key><true/>
@@ -50,16 +59,25 @@ cat > "$APP/Contents/Info.plist" <<EOF
 EOF
 
 IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application: .*($TEAM_ID)" | head -1 | awk -F'"' '{print $2}' || true)
-SIGN=(codesign --force --options runtime --entitlements "$ENTITLEMENTS")
+SIGN_PLAIN=(codesign --force --options runtime)
 if [ -n "$IDENTITY" ]; then
-    SIGN+=(--timestamp --sign "$IDENTITY")
+    SIGN_PLAIN+=(--timestamp --sign "$IDENTITY")
     echo "signing as $IDENTITY"
 else
-    SIGN+=(--sign -)
+    SIGN_PLAIN+=(--sign -)
     echo "no Developer ID Application certificate for team $TEAM_ID in the keychain, signing ad-hoc"
 fi
 
-# inside-out: every nested Mach-O, then the helper, then the app
+SIGN=("${SIGN_PLAIN[@]}" --entitlements "$ENTITLEMENTS")
+
+# inside-out: Sparkle's helpers and framework (without Wine's entitlements), every nested Mach-O,
+# then the helper, then the app
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+"${SIGN_PLAIN[@]}" "$SPARKLE/XPCServices/Installer.xpc"
+"${SIGN_PLAIN[@]}" --preserve-metadata=entitlements "$SPARKLE/XPCServices/Downloader.xpc"
+"${SIGN_PLAIN[@]}" "$SPARKLE/Autoupdate"
+"${SIGN_PLAIN[@]}" "$SPARKLE/Updater.app"
+"${SIGN_PLAIN[@]}" "$APP/Contents/Frameworks/Sparkle.framework"
 find "$APP/Contents/SharedSupport" -type f -print0 | while IFS= read -r -d '' file; do
     if file -b "$file" | grep -q "Mach-O"; then
         "${SIGN[@]}" "$file" 2>&1 | grep -v "replacing existing signature" || true
@@ -81,4 +99,4 @@ elif [ -n "$IDENTITY" ]; then
 fi
 
 hdiutil create -volname Neutron -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
-echo "built $APP and $DMG"
+echo "built $APP and $DMG (version $VERSION, build $BUILD)"

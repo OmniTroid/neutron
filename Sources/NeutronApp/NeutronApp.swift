@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct NeutronApp: App {
     @State private var model = AppModel()
+    @StateObject private var updater = Updater()
 
     init() {
         // lets `swift run NeutronApp` come to the front without an app bundle
@@ -22,6 +23,7 @@ struct NeutronApp: App {
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1240, height: 800)
         .commands {
+            CheckForUpdatesCommand(updater: updater)
             CommandGroup(after: .toolbar) {
                 Button("Refresh Library") { Task { await model.load() } }
                     .keyboardShortcut("r")
