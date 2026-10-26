@@ -114,7 +114,13 @@ if $NOTARIZE; then
     rm "$ZIP"
 fi
 
-hdiutil create -volname Neutron -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
+STAGING="$ROOT/build/dmg-staging"
+rm -rf "$STAGING"
+mkdir -p "$STAGING"
+cp -cR "$APP" "$STAGING/"
+ln -s /Applications "$STAGING/Applications"
+hdiutil create -volname Neutron -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
+rm -rf "$STAGING"
 if [ -n "$IDENTITY" ]; then
     codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 fi
