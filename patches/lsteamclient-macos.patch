@@ -1,0 +1,246 @@
+diff -ruN a/lsteamclient/Makefile.in b/lsteamclient/Makefile.in
+--- a/lsteamclient/Makefile.in	2026-10-26 14:47:18
++++ b/lsteamclient/Makefile.in	2026-10-26 14:53:57
+@@ -1,8 +1,9 @@
+ MODULE    = lsteamclient.dll
+ UNIXLIB   = lsteamclient.so
+ IMPORTS   = user32 ws2_32
++UNIX_LIBS = -lc++
+ 
+-EXTRADEFS = -DSTEAM_API_EXPORTS -Dprivate=public -Dprotected=public
++EXTRADEFS = -DNOMINMAX -DSTEAM_API_EXPORTS -Dprivate=public -Dprotected=public
+ 
+ SOURCES = \
+ 	steam_input_manual.c \
+diff -ruN a/lsteamclient/unix_steam_input_manual.cpp b/lsteamclient/unix_steam_input_manual.cpp
+--- a/lsteamclient/unix_steam_input_manual.cpp	2026-10-26 14:47:18
++++ b/lsteamclient/unix_steam_input_manual.cpp	2026-10-26 14:53:27
+@@ -192,6 +192,75 @@
+         return vk_to_xkeysym[win_vk];
+     return 0;
+ }
++#elif defined(__APPLE__)
++/* Carbon kVK_* codes, see HIToolbox/Events.h */
++uint32_t manual_convert_nNativeKeyCode( uint32_t win_vk )
++{
++    static const uint8_t letters[26] =
++    {
++        0x00, 0x0B, 0x08, 0x02, 0x0E, 0x03, 0x05, 0x04, 0x22, 0x26, 0x28, 0x25, 0x2E, /* A-M */
++        0x2D, 0x1F, 0x23, 0x0C, 0x0F, 0x01, 0x11, 0x20, 0x09, 0x0D, 0x07, 0x10, 0x06, /* N-Z */
++    };
++    static const uint8_t digits[10] = { 0x1D, 0x12, 0x13, 0x14, 0x15, 0x17, 0x16, 0x1A, 0x1C, 0x19 };
++    static const uint8_t numpad[10] = { 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C };
++    static const uint8_t fkeys[20] =
++    {
++        0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D,
++        0x67, 0x6F, 0x69, 0x6B, 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A,
++    };
++
++    if (win_vk >= 'A' && win_vk <= 'Z') return letters[win_vk - 'A'];
++    if (win_vk >= '0' && win_vk <= '9') return digits[win_vk - '0'];
++    if (win_vk >= 0x60 && win_vk <= 0x69) return numpad[win_vk - 0x60];
++    if (win_vk >= 0x70 && win_vk <= 0x83) return fkeys[win_vk - 0x70];
++
++    switch (win_vk)
++    {
++    case 0x08: return 0x33; /* VK_BACK */
++    case 0x09: return 0x30; /* VK_TAB */
++    case 0x0C: return 0x47; /* VK_CLEAR */
++    case 0x0D: return 0x24; /* VK_RETURN */
++    case 0x10: case 0xA0: return 0x38; /* VK_SHIFT, VK_LSHIFT */
++    case 0xA1: return 0x3C; /* VK_RSHIFT */
++    case 0x11: case 0xA2: return 0x3B; /* VK_CONTROL, VK_LCONTROL */
++    case 0xA3: return 0x3E; /* VK_RCONTROL */
++    case 0x12: case 0xA4: return 0x3A; /* VK_MENU, VK_LMENU */
++    case 0xA5: return 0x3D; /* VK_RMENU */
++    case 0x5B: return 0x37; /* VK_LWIN */
++    case 0x5C: return 0x36; /* VK_RWIN */
++    case 0x14: return 0x39; /* VK_CAPITAL */
++    case 0x1B: return 0x35; /* VK_ESCAPE */
++    case 0x20: return 0x31; /* VK_SPACE */
++    case 0x21: return 0x74; /* VK_PRIOR */
++    case 0x22: return 0x79; /* VK_NEXT */
++    case 0x23: return 0x77; /* VK_END */
++    case 0x24: return 0x73; /* VK_HOME */
++    case 0x25: return 0x7B; /* VK_LEFT */
++    case 0x26: return 0x7E; /* VK_UP */
++    case 0x27: return 0x7C; /* VK_RIGHT */
++    case 0x28: return 0x7D; /* VK_DOWN */
++    case 0x2D: return 0x72; /* VK_INSERT */
++    case 0x2E: return 0x75; /* VK_DELETE */
++    case 0x2F: return 0x72; /* VK_HELP */
++    case 0x6A: return 0x43; /* VK_MULTIPLY */
++    case 0x6B: return 0x45; /* VK_ADD */
++    case 0x6D: return 0x4E; /* VK_SUBTRACT */
++    case 0x6E: return 0x41; /* VK_DECIMAL */
++    case 0x6F: return 0x4B; /* VK_DIVIDE */
++    case 0xBA: return 0x29; /* VK_OEM_1 */
++    case 0xBB: return 0x18; /* VK_OEM_PLUS */
++    case 0xBC: return 0x2B; /* VK_OEM_COMMA */
++    case 0xBD: return 0x1B; /* VK_OEM_MINUS */
++    case 0xBE: return 0x2F; /* VK_OEM_PERIOD */
++    case 0xBF: return 0x2C; /* VK_OEM_2 */
++    case 0xC0: return 0x32; /* VK_OEM_3 */
++    case 0xDB: return 0x21; /* VK_OEM_4 */
++    case 0xDC: return 0x2A; /* VK_OEM_5 */
++    case 0xDD: return 0x1E; /* VK_OEM_6 */
++    case 0xDE: return 0x27; /* VK_OEM_7 */
++    }
++    return 0xFFFF;
++}
+ #else
+ #error You must implement VK<->Native keysym conversion for this platform.
+ #endif
+diff -ruN a/lsteamclient/unix_wine_paths.h b/lsteamclient/unix_wine_paths.h
+--- a/lsteamclient/unix_wine_paths.h	1970-01-01 01:00:00
++++ b/lsteamclient/unix_wine_paths.h	2026-10-26 14:53:08
+@@ -0,0 +1,103 @@
++/* Upstream Wine keeps these ntdll.so path helpers internal; Proton's Wine exports them. */
++
++#include <limits.h>
++#include <string>
++
++static bool get_drive_root( char letter, char root[PATH_MAX] )
++{
++    const char *prefix = getenv( "WINEPREFIX" );
++    std::string link = prefix ? prefix : std::string( getenv( "HOME" ) ) + "/.wine";
++    link += "/dosdevices/";
++    link += letter;
++    link += ':';
++    return realpath( link.c_str(), root ) != NULL;
++}
++
++static NTSTATUS wine_unix_to_nt_file_name( const char *name, WCHAR *buffer, ULONG *size )
++{
++    char resolved[PATH_MAX], root[PATH_MAX], drive = 0;
++    size_t best_len = 0;
++    std::string nt;
++    std::vector<WCHAR> ntW;
++    ULONG len;
++
++    if (!realpath( name, resolved ))
++    {
++        if (strlen( name ) >= sizeof(resolved)) return STATUS_OBJECT_NAME_INVALID;
++        strcpy( resolved, name );
++    }
++
++    for (char c = 'a'; c <= 'z'; c++)
++    {
++        size_t root_len;
++        if (!get_drive_root( c, root )) continue;
++        root_len = strcmp( root, "/" ) ? strlen( root ) : 0;
++        if (strncmp( resolved, root, root_len ) || (resolved[root_len] && resolved[root_len] != '/')) continue;
++        if (!drive || root_len > best_len)
++        {
++            drive = c;
++            best_len = root_len;
++        }
++    }
++
++    if (drive)
++    {
++        nt = "\\??\\";
++        nt += (char)(drive - 'a' + 'A');
++        nt += ':';
++        nt += resolved[best_len] ? resolved + best_len : "/";
++    }
++    else nt = std::string( "\\??\\unix" ) + resolved;
++    for (char &ch : nt) if (ch == '/') ch = '\\';
++
++    ntW.resize( nt.size() + 1 );
++    len = ntdll_umbstowcs( nt.c_str(), nt.size(), ntW.data(), nt.size() );
++    if (!buffer || *size <= len)
++    {
++        *size = len + 1;
++        return STATUS_BUFFER_TOO_SMALL;
++    }
++    memcpy( buffer, ntW.data(), len * sizeof(WCHAR) );
++    buffer[len] = 0;
++    *size = len + 1;
++    return STATUS_SUCCESS;
++}
++
++static NTSTATUS wine_nt_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char *nameA, ULONG *size, UINT disposition )
++{
++    const UNICODE_STRING *ntW = attr->ObjectName;
++    std::vector<char> utf8( ntW->Length / sizeof(WCHAR) * 3 + 1 );
++    char root[PATH_MAX];
++    std::string nt, unix_path;
++    int len;
++
++    len = ntdll_wcstoumbs( ntW->Buffer, ntW->Length / sizeof(WCHAR), utf8.data(), utf8.size() - 1, FALSE );
++    if (len < 0) return STATUS_OBJECT_NAME_INVALID;
++    nt.assign( utf8.data(), len );
++    if (!nt.compare( 0, 4, "\\??\\" )) nt.erase( 0, 4 );
++
++    if (!nt.compare( 0, 5, "unix\\" )) unix_path = nt.substr( 4 );
++    else
++    {
++        char drive = 'c';
++        if (nt.size() >= 2 && nt[1] == ':' && isalpha( (unsigned char)nt[0] ))
++        {
++            drive = tolower( (unsigned char)nt[0] );
++            nt.erase( 0, 2 );
++        }
++        if (!get_drive_root( drive, root )) return STATUS_OBJECT_PATH_NOT_FOUND;
++        unix_path = strcmp( root, "/" ) ? root : "";
++        unix_path += nt;
++    }
++    for (char &ch : unix_path) if (ch == '\\') ch = '/';
++    if (unix_path.empty()) unix_path = "/";
++
++    if (*size <= unix_path.size())
++    {
++        *size = unix_path.size() + 1;
++        return STATUS_BUFFER_TOO_SMALL;
++    }
++    memcpy( nameA, unix_path.c_str(), unix_path.size() + 1 );
++    *size = unix_path.size() + 1;
++    return STATUS_SUCCESS;
++}
+diff -ruN a/lsteamclient/unixlib.cpp b/lsteamclient/unixlib.cpp
+--- a/lsteamclient/unixlib.cpp	2026-10-26 14:47:18
++++ b/lsteamclient/unixlib.cpp	2026-10-26 14:56:34
+@@ -13,6 +13,10 @@
+ #pragma makedep unix
+ #endif
+ 
++#ifdef __APPLE__
++#include "unix_wine_paths.h"
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(steamclient);
+ 
+ char *g_tmppath;
+@@ -791,8 +795,14 @@
+     LOAD_FUNC( Steam_GetAPICallResult );
+     LOAD_FUNC( Steam_FreeLastCallback );
+     LOAD_FUNC( Steam_ReleaseThreadLocalMemory );
++#ifdef __APPLE__
++    /* not exported by the macOS client */
++    p_Steam_IsKnownInterface = (decltype(p_Steam_IsKnownInterface))dlsym( steamclient, "Steam_IsKnownInterface" );
++    p_Steam_NotifyMissingInterface = (decltype(p_Steam_NotifyMissingInterface))dlsym( steamclient, "Steam_NotifyMissingInterface" );
++#else
+     LOAD_FUNC( Steam_IsKnownInterface );
+     LOAD_FUNC( Steam_NotifyMissingInterface );
++#endif
+ 
+     TRACE( "Loaded host steamclient from %s\n", debugstr_a(path) );
+     return 0;
+@@ -847,14 +857,14 @@
+ template< typename Params >
+ static NTSTATUS steamclient_Steam_IsKnownInterface( Params *params, bool wow64 )
+ {
+-    params->_ret = p_Steam_IsKnownInterface( params->version );
++    params->_ret = p_Steam_IsKnownInterface ? p_Steam_IsKnownInterface( params->version ) : true;
+     return 0;
+ }
+ 
+ template< typename Params >
+ static NTSTATUS steamclient_Steam_NotifyMissingInterface( Params *params, bool wow64 )
+ {
+-    p_Steam_NotifyMissingInterface( params->pipe, params->version );
++    if (p_Steam_NotifyMissingInterface) p_Steam_NotifyMissingInterface( params->pipe, params->version );
+     return 0;
+ }
+ 

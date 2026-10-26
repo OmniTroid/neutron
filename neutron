@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Run Windows Steam games on macOS through Wine, bridged to the native Steam client."""
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+DIST = ROOT / "dist"
+BACKENDS = ("dxmt", "wined3d")
+STEAM_CLIENT_DIR = Path.home() / "Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
+PREFIXES = Path.home() / "Library/Application Support/Neutron/prefixes"
+PFX_STEAM_DIR = "drive_c/Program Files (x86)/Steam"
+
+STEAM_REG = r"""Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Valve\Steam]
+"SteamPath"="C:\\Program Files (x86)\\Steam"
+"SteamExe"="C:\\Program Files (x86)\\Steam\\steam.exe"
+
+[HKEY_CURRENT_USER\Software\Valve\Steam\ActiveProcess]
+"SteamClientDll"="C:\\Program Files (x86)\\Steam\\steamclient.dll"
+"SteamClientDll64"="C:\\Program Files (x86)\\Steam\\steamclient64.dll"
+"SteamPath"="C:\\Program Files (x86)\\Steam"
+
+[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\Steam]
+"InstallPath"="C:\\Program Files (x86)\\Steam"
+"""
+
+
+def runtime(backend):
+    path = DIST / "runtimes" / backend
+    if not path.is_dir():
+        sys.exit(f"neutron: runtime {path} missing, run scripts/build.sh")
+    return path
+
+
+def wine_env(prefix, backend, appid):
+    env = dict(os.environ)
+    env["WINEPREFIX"] = str(prefix)
+    env.setdefault("WINEDEBUG", "-all")
+    env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(STEAM_CLIENT_DIR)
+    if appid:
+        env["SteamAppId"] = env["SteamGameId"] = str(appid)
+    return env
+
+
+def setup_prefix(prefix, backend, env):
+    wine = runtime(backend) / "bin/wine"
+    stamp_file = prefix / ".neutron"
+    stamp = "\n".join([backend, str((runtime(backend) / "lib/wine/x86_64-unix/lsteamclient.so").stat().st_mtime_ns)])
+    if stamp_file.exists() and stamp_file.read_text() == stamp:
+        return
+
+    prefix.mkdir(parents=True, exist_ok=True)
+    # exits nonzero on harmless setupapi warnings
+    subprocess.run([wine, "wineboot", "-u"], env=env, capture_output=True)
+    if not (prefix / "drive_c/windows/system32/lsteamclient.dll").exists():
+        sys.exit(f"neutron: wineboot failed to set up {prefix}")
+
+    steam_dir = prefix / PFX_STEAM_DIR
+    steam_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("steamclient.dll", "steamclient64.dll"):
+        shutil.copyfile(DIST / "steam" / name, steam_dir / name)
+
+    reg = prefix / "neutron-steam.reg"
+    reg.write_text(STEAM_REG)
+    subprocess.run([wine, "regedit", "/S", str(reg)], env=env, check=True, capture_output=True)
+    subprocess.run([runtime(backend) / "bin/wineserver", "-w"], env=env, check=True)
+    stamp_file.write_text(stamp)
+
+
+def cmd_run(args):
+    prefix = Path(args.prefix).resolve() if args.prefix else PREFIXES / (str(args.appid) if args.appid else "default")
+    env = wine_env(prefix, args.backend, args.appid)
+    setup_prefix(prefix, args.backend, env)
+    exe = args.exe
+    if Path(exe).exists():
+        path = Path(exe).resolve()
+        os.chdir(path.parent)
+        exe = "Z:" + str(path).replace("/", "\\")
+    wine = str(runtime(args.backend) / "bin/wine")
+    os.execve(wine, [wine, "steam.exe", exe, *args.args], env)
+
+
+def cmd_wine(args):
+    prefix = Path(args.prefix).resolve() if args.prefix else PREFIXES / "default"
+    env = wine_env(prefix, args.backend, None)
+    setup_prefix(prefix, args.backend, env)
+    wine = str(runtime(args.backend) / "bin/wine")
+    os.execve(wine, [wine, *args.args], env)
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="neutron")
+    sub = parser.add_subparsers(required=True)
+
+    run = sub.add_parser("run", help="launch a Windows game exe through the Steam bridge")
+    run.add_argument("--appid", type=int, help="Steam AppID (enables Steamworks)")
+    run.add_argument("--backend", choices=BACKENDS, default="dxmt")
+    run.add_argument("--prefix")
+    run.add_argument("exe")
+    run.add_argument("args", nargs=argparse.REMAINDER)
+    run.set_defaults(func=cmd_run)
+
+    wine = sub.add_parser("wine", help="run a raw wine command in a prefix")
+    wine.add_argument("--backend", choices=BACKENDS, default="dxmt")
+    wine.add_argument("--prefix")
+    wine.add_argument("args", nargs=argparse.REMAINDER)
+    wine.set_defaults(func=cmd_wine)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
