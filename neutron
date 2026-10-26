@@ -2,17 +2,29 @@
 """Run Windows Steam games on macOS through Wine, bridged to the native Steam client."""
 
 import argparse
+import io
+import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 BACKENDS = ("dxmt", "wined3d")
 STEAM_CLIENT_DIR = Path.home() / "Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
-PREFIXES = Path.home() / "Library/Application Support/Neutron/prefixes"
+NEUTRON = Path.home() / "Library/Application Support/Neutron"
+PREFIXES = NEUTRON / "prefixes"
+LIBRARY = NEUTRON / "library"
+CONFIG = NEUTRON / "config.json"
+STEAMCMD_DIR = NEUTRON / "steamcmd"
+STEAMCMD_HOME = NEUTRON / "steamcmd-home"
+STEAMCMD_URL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz"
 PFX_STEAM_DIR = "drive_c/Program Files (x86)/Steam"
 
 STEAM_REG = r"""Windows Registry Editor Version 5.00
@@ -73,17 +85,124 @@ def setup_prefix(prefix, backend, env):
     stamp_file.write_text(stamp)
 
 
+def parse_vdf(text):
+    """Parse Valve KeyValues text into nested dicts."""
+    root = {}
+    stack, key = [root], None
+    for string, brace in re.findall(r'"((?:[^"\\]|\\.)*)"|([{}])', text):
+        if brace == "{":
+            stack[-1][key] = {}
+            stack.append(stack[-1][key])
+            key = None
+        elif brace == "}":
+            stack.pop()
+            if len(stack) == 1:
+                break
+        elif key is None:
+            key = re.sub(r"\\(.)", r"\1", string)
+        else:
+            stack[-1][key] = re.sub(r"\\(.)", r"\1", string)
+            key = None
+    return root
+
+
+def launch_entry(appinfo):
+    """Pick the launch option Steam would use on Windows, preferring 64-bit."""
+    def usable(entry):
+        config = entry.get("config", {})
+        return (entry.get("executable")
+                and "windows" in config.get("oslist", "windows")
+                and entry.get("type", "default") in ("default", "none")
+                and not config.get("betakey"))
+
+    entries = [e for e in appinfo.get("config", {}).get("launch", {}).values() if usable(e)]
+    entries.sort(key=lambda e: e.get("config", {}).get("osarch") != "64")
+    return entries[0] if entries else None
+
+
+def load_config():
+    return json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
+
+
+def steamcmd(*commands, capture=False):
+    if not (STEAMCMD_DIR / "steamcmd.sh").exists():
+        STEAMCMD_DIR.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(STEAMCMD_URL) as resp:
+            tarfile.open(fileobj=io.BytesIO(resp.read())).extractall(STEAMCMD_DIR, filter="data")
+    STEAMCMD_HOME.mkdir(parents=True, exist_ok=True)
+    # on macOS, steamcmd otherwise shares ~/Library/Application Support/Steam with the running Steam client
+    env = dict(os.environ, HOME=str(STEAMCMD_HOME))
+    cmd = [str(STEAMCMD_DIR / "steamcmd.sh"), *commands, "+quit"]
+    if not capture:
+        return subprocess.run(cmd, env=env).returncode, ""
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    output = []
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        output.append(line)
+    return proc.wait(), "".join(output)
+
+
+def steam_user(args):
+    user = args.user or load_config().get("user")
+    if not user:
+        sys.exit("neutron: no Steam account, run `neutron login <user>` first")
+    return user
+
+
+def cmd_login(args):
+    code, _ = steamcmd("+login", args.user)
+    if code:
+        sys.exit(code)
+    NEUTRON.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(json.dumps({**load_config(), "user": args.user}, indent=2))
+
+
+def cmd_install(args):
+    user = steam_user(args)
+    install_dir = LIBRARY / str(args.appid)
+    install_dir.mkdir(parents=True, exist_ok=True)
+
+    _, output = steamcmd("+@sSteamCmdForcePlatformType", "windows", "+force_install_dir", str(install_dir),
+                         "+login", user, "+app_update", str(args.appid), "validate", capture=True)
+    if f"Success! App '{args.appid}' fully installed" not in output:
+        sys.exit(f"neutron: install of {args.appid} failed")
+
+    _, output = steamcmd("+login", user, "+app_info_update", "1", "+app_info_print", str(args.appid), capture=True)
+    start = re.search(rf'^\s*"{args.appid}"\s*$', output, re.MULTILINE)
+    appinfo = parse_vdf(output[start.start():]).get(str(args.appid)) if start else None
+    if not appinfo or not launch_entry(appinfo):
+        sys.exit(f"neutron: no Windows launch option found for {args.appid}")
+    (install_dir / "neutron-appinfo.json").write_text(json.dumps(appinfo, indent=2))
+    print(f"installed {appinfo.get('common', {}).get('name', args.appid)} to {install_dir}")
+
+
+def resolve_launch(appid):
+    install_dir = LIBRARY / str(appid)
+    info_file = install_dir / "neutron-appinfo.json"
+    if not info_file.exists():
+        sys.exit(f"neutron: {appid} is not installed, run `neutron install {appid}`")
+    entry = launch_entry(json.loads(info_file.read_text()))
+    exe = install_dir / entry["executable"].replace("\\", "/")
+    workdir = install_dir / entry["workingdir"].replace("\\", "/") if entry.get("workingdir") else exe.parent
+    return exe, workdir, shlex.split(entry.get("arguments", ""))
+
+
 def cmd_run(args):
+    if args.exe:
+        exe, launch_args = Path(args.exe).resolve(), []
+        workdir = exe.parent
+    elif args.appid:
+        exe, workdir, launch_args = resolve_launch(args.appid)
+    else:
+        sys.exit("neutron: pass an exe or --appid")
+
     prefix = Path(args.prefix).resolve() if args.prefix else PREFIXES / (str(args.appid) if args.appid else "default")
     env = wine_env(prefix, args.backend, args.appid)
     setup_prefix(prefix, args.backend, env)
-    exe = args.exe
-    if Path(exe).exists():
-        path = Path(exe).resolve()
-        os.chdir(path.parent)
-        exe = "Z:" + str(path).replace("/", "\\")
+    os.chdir(workdir)
     wine = str(runtime(args.backend) / "bin/wine")
-    os.execve(wine, [wine, "steam.exe", exe, *args.args], env)
+    os.execve(wine, [wine, "steam.exe", "Z:" + str(exe).replace("/", "\\"), *launch_args, *args.args], env)
 
 
 def cmd_wine(args):
@@ -98,11 +217,20 @@ def main():
     parser = argparse.ArgumentParser(prog="neutron")
     sub = parser.add_subparsers(required=True)
 
-    run = sub.add_parser("run", help="launch a Windows game exe through the Steam bridge")
+    login = sub.add_parser("login", help="log steamcmd into a Steam account (interactive, cached afterwards)")
+    login.add_argument("user")
+    login.set_defaults(func=cmd_login)
+
+    install = sub.add_parser("install", help="download a game's Windows build")
+    install.add_argument("appid", type=int)
+    install.add_argument("--user")
+    install.set_defaults(func=cmd_install)
+
+    run = sub.add_parser("run", help="launch an installed game, or an exe, through the Steam bridge")
     run.add_argument("--appid", type=int, help="Steam AppID (enables Steamworks)")
     run.add_argument("--backend", choices=BACKENDS, default="dxmt")
     run.add_argument("--prefix")
-    run.add_argument("exe")
+    run.add_argument("exe", nargs="?")
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=cmd_run)
 
