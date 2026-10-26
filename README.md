@@ -6,6 +6,7 @@ Proton-style runner for Windows Steam games on Apple Silicon macOS: Wine 11 unde
 scripts/build.sh && swift build -c release
 .build/release/neutron install <appid> --user <steam-user>
 .build/release/neutron run --appid <appid>
+scripts/bundle-app.sh && open build/Neutron.app
 ```
 
-`build.sh` produces `dist/` (one Wine runtime per graphics backend plus the Steam bridge); the `neutron` CLI and the `NeutronKit` engine it shares with the app are a Swift package. `install` downloads the Windows build with DepotDownloader into `~/Library/Application Support/Neutron/library`; `run` launches it through Proton's `steam.exe` with the Mac Steam client running.
+`build.sh` produces `dist/` (one Wine runtime per graphics backend plus the Steam bridge); the `neutron` CLI and the `NeutronKit` engine it shares with the app are a Swift package. `install` downloads the Windows build with DepotDownloader into `~/Library/Application Support/Neutron/library`; `run` launches it through Proton's `steam.exe` with the Mac Steam client running. `Neutron.app` does the same from a library of your owned Windows games.

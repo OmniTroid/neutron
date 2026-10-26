@@ -106,3 +106,27 @@ struct AppInfoTests {
         #expect(Library.splitArguments(#"  -a  "b c" ""  -d"#) == ["-a", "b c", "", "-d"])
     }
 }
+
+struct InstallSessionParsingTests {
+    @Test func parsesProgressLines() {
+        let events = InstallSession.parse(line: "42.50% /Users/x/Library/Application Support/Neutron/library/440/tf/tf2_misc_dir.vpk")
+        guard case .progress(let value) = events.first, case .status(let file) = events.last else {
+            Issue.record("expected progress and status, got \(events)")
+            return
+        }
+        #expect(value == 0.425)
+        #expect(file == "tf2_misc_dir.vpk")
+    }
+
+    @Test func detectsPrompts() {
+        #expect(InstallSession.prompt(in: #"Enter account password for "dave": "#) == .password)
+        #expect(InstallSession.prompt(in: "STEAM GUARD! Please enter your 2-factor auth code from your authenticator app: ") == .guardCode)
+        #expect(InstallSession.prompt(in: "STEAM GUARD! Please enter the auth code sent to the email at d***@gmail.com: ")
+            == .emailCode("d***@gmail.com"))
+        #expect(InstallSession.prompt(in: "Connecting to Steam3...") == nil)
+        guard case .prompt(.mobileConfirmation) = InstallSession.parse(line: "STEAM GUARD! Use the Steam Mobile App to confirm your sign in...").first else {
+            Issue.record("expected mobile confirmation prompt")
+            return
+        }
+    }
+}

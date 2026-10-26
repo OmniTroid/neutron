@@ -14,6 +14,8 @@ public enum Paths {
     public static let steam = home.appending(path: "Library/Application Support/Steam")
     public static let steamClient = steam.appending(path: "Steam.AppBundle/Steam/Contents/MacOS")
     public static let steamAppInfo = steam.appending(path: "appcache/appinfo.vdf")
+    public static let steamPackageInfo = steam.appending(path: "appcache/packageinfo.vdf")
+    public static let steamLibraryCache = steam.appending(path: "appcache/librarycache")
 
     public static let neutron = home.appending(path: "Library/Application Support/Neutron")
     public static let prefixes = neutron.appending(path: "prefixes")

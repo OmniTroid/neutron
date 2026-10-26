@@ -123,3 +123,33 @@ func run(_ executable: URL, _ arguments: [String], env: [String: String]) throws
     process.waitUntilExit()
     return process.terminationStatus
 }
+
+/// A running game, launched for the app; output goes to `neutron.log` in the prefix.
+public final class GameSession: @unchecked Sendable {
+    private let process = Process()
+    private let prefix: Prefix
+
+    public var logURL: URL { prefix.url.appending(path: "neutron.log") }
+
+    public init(prefix: Prefix, command: Command, onExit: @escaping @Sendable (Int32) -> Void) throws {
+        self.prefix = prefix
+        FileManager.default.createFile(atPath: prefix.url.appending(path: "neutron.log").path, contents: nil)
+        let log = try FileHandle(forWritingTo: prefix.url.appending(path: "neutron.log"))
+        process.executableURL = command.executable
+        process.arguments = command.arguments
+        process.environment = command.environment
+        process.currentDirectoryURL = command.workingDirectory
+        process.standardOutput = log
+        process.standardError = log
+        process.terminationHandler = { process in
+            try? log.close()
+            onExit(process.terminationStatus)
+        }
+        try process.run()
+    }
+
+    /// Stops the game and everything else running in its prefix.
+    public func stop() {
+        try? run(prefix.runtime.appending(path: "bin/wineserver"), ["-k"], env: prefix.environment(appID: nil))
+    }
+}

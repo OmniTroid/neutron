@@ -91,6 +91,15 @@ private struct Reader {
 public enum AppInfo {
     /// Reads one app from the Steam client's appinfo.vdf cache (v28 or v29); nil if Steam hasn't cached it.
     public static func read(appID: UInt32, from url: URL = Paths.steamAppInfo) throws -> KeyValue? {
+        try entries(from: url, only: appID)[appID]
+    }
+
+    /// Every app in the Steam client's appinfo.vdf cache.
+    public static func all(from url: URL = Paths.steamAppInfo) throws -> [UInt32: KeyValue] {
+        try entries(from: url, only: nil)
+    }
+
+    private static func entries(from url: URL, only wanted: UInt32?) throws -> [UInt32: KeyValue] {
         var reader = Reader(bytes: [UInt8](try Data(contentsOf: url)), pos: 0)
         let magic = try reader.int(UInt32.self)
         _ = try reader.int(UInt32.self)
@@ -107,19 +116,43 @@ public enum AppInfo {
             throw NeutronError("unsupported appinfo.vdf version \(String(magic, radix: 16))")
         }
 
+        var result: [UInt32: KeyValue] = [:]
         while true {
             let id = try reader.int(UInt32.self)
-            if id == 0 { return nil }
+            if id == 0 { return result }
             let size = Int(try reader.int(UInt32.self))
             let next = reader.pos + size
-            if id == appID {
+            if wanted == nil || id == wanted {
                 // skip info state, last updated, PICS token, text SHA-1, change number, binary SHA-1
                 reader.pos += 60
                 let info = try reader.object(strings: strings)
-                return info["appinfo"] ?? info
+                result[id] = info["appinfo"] ?? info
+                if wanted != nil { return result }
             }
             reader.pos = next
         }
+    }
+
+    /// App IDs covered by the packages (licenses) cached in the Steam client's packageinfo.vdf.
+    public static func ownedAppIDs(from url: URL = Paths.steamPackageInfo) throws -> Set<UInt32> {
+        var reader = Reader(bytes: [UInt8](try Data(contentsOf: url)), pos: 0)
+        let magic = try reader.int(UInt32.self)
+        _ = try reader.int(UInt32.self)
+        guard magic == 0x0656_5528 || magic == 0x0656_5527 else {
+            throw NeutronError("unsupported packageinfo.vdf version \(String(magic, radix: 16))")
+        }
+
+        var apps = Set<UInt32>()
+        while try reader.int(UInt32.self) != 0xFFFF_FFFF {
+            // skip SHA-1, change number and (v28) PICS token
+            reader.pos += 24 + (magic == 0x0656_5528 ? 8 : 0)
+            for (_, package) in try reader.object(strings: nil).children {
+                for (_, app) in package["appids"]?.children ?? [] {
+                    if case .int(let id) = app { apps.insert(UInt32(truncatingIfNeeded: id)) }
+                }
+            }
+        }
+        return apps
     }
 
     /// The launch option Steam would use on Windows, preferring 64-bit.

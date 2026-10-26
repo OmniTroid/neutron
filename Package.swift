@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "NeutronKit", targets: ["NeutronKit"]),
         .executable(name: "neutron", targets: ["neutron"]),
+        .executable(name: "NeutronApp", targets: ["NeutronApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", exact: "1.5.0"),
@@ -20,6 +21,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
+        .executableTarget(name: "NeutronApp", dependencies: ["NeutronKit"]),
         .testTarget(name: "NeutronKitTests", dependencies: ["NeutronKit"]),
     ]
 )
