@@ -102,6 +102,18 @@ struct AppInfoTests {
         #expect(game.is64Bit)
     }
 
+    @Test func prefersDirect3D11AlternativeWithoutDefault() {
+        let peakLike: KeyValue = .object([("config", .object([("launch", .object([
+            ("5", .object([("executable", .string("PEAK.exe")), ("type", .string("option1")),
+                           ("description", .string("PEAK using DX12")),
+                           ("config", .object([("oslist", .string("windows")), ("osarch", .int(64))]))])),
+            ("6", .object([("executable", .string("PEAK.exe")), ("type", .string("option2")),
+                           ("arguments", .string("-force-d3d11")), ("description", .string("PEAK using DX11")),
+                           ("config", .object([("oslist", .string("windows")), ("osarch", .int(64))]))])),
+        ]))]))])
+        #expect(AppInfo.windowsLaunch(peakLike)?["arguments"]?.text == "-force-d3d11")
+    }
+
     @Test func splitsQuotedArguments() {
         #expect(Library.splitArguments(#"  -a  "b c" ""  -d"#) == ["-a", "b c", "", "-d"])
     }
@@ -128,5 +140,65 @@ struct InstallSessionParsingTests {
             Issue.record("expected mobile confirmation prompt")
             return
         }
+    }
+}
+
+struct CloudSavesTests {
+    func rule(_ root: String, _ path: String, _ pattern: String, _ platform: String?) -> KeyValue {
+        var pairs: [(key: String, value: KeyValue)] = [("root", .string(root)), ("path", .string(path)), ("pattern", .string(pattern))]
+        if let platform { pairs.append(("platforms", .object([("1", .string(platform))]))) }
+        return .object(pairs)
+    }
+
+    @Test func pairsWindowsRuleWithMacRule() {
+        let peak: KeyValue = .object([("ufs", .object([("savefiles", .object([
+            ("0", rule("WinAppDataLocalLow", "LandCrab/PEAK", "*.peak", "Windows")),
+            ("1", rule("LinuxXdgConfigHome", "unity3d/LandCrab/PEAK", "*.peak", "Linux")),
+            ("2", rule("MacAppSupport", "unity.LandCrab.PEAK", "*.peak", "MacOS")),
+        ]))]))])
+        #expect(CloudSaves.links(for: peak) == [SaveLink(windowsRoot: "WinAppDataLocalLow", windowsPath: "LandCrab/PEAK",
+                                                         macRoot: "MacAppSupport", macPath: "unity.LandCrab.PEAK")])
+    }
+
+    @Test func appliesRootOverride() {
+        let game: KeyValue = .object([("ufs", .object([
+            ("savefiles", .object([("0", rule("WinMyDocuments", "My Games/Thing", "*", nil))])),
+            ("rootoverrides", .object([("0", .object([("root", .string("WinMyDocuments")), ("os", .string("MacOS")),
+                                                      ("useinstead", .string("MacAppSupport")), ("addpath", .string("Thing"))]))])),
+        ]))])
+        #expect(CloudSaves.links(for: game) == [SaveLink(windowsRoot: "WinMyDocuments", windowsPath: "My Games/Thing",
+                                                         macRoot: "MacAppSupport", macPath: "Thing/My Games/Thing")])
+    }
+
+    @Test func skipsTokensAndWindowsOnlyRules() {
+        let game: KeyValue = .object([("ufs", .object([("savefiles", .object([
+            ("0", rule("WinAppDataRoaming", "Thing/{64BitSteamID}", "*", "Windows")),
+            ("1", rule("WinAppDataRoaming", "Other", "*.sav", "Windows")),
+        ]))]))])
+        #expect(CloudSaves.links(for: game).isEmpty)
+    }
+
+    @Test func linksWithoutClobberingSaves() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let prefix = root.appending(path: "pfx"), home = root.appending(path: "home")
+        let link = SaveLink(windowsRoot: "WinAppDataLocalLow", windowsPath: "LandCrab/PEAK", macRoot: "MacAppSupport", macPath: "unity.LandCrab.PEAK")
+        let windowsDir = prefix.appending(path: "drive_c/users/me/AppData/LocalLow/LandCrab/PEAK")
+        let macDir = home.appending(path: "Library/Application Support/unity.LandCrab.PEAK")
+
+        #expect(try CloudSaves.apply([link], prefix: prefix, home: home, user: "me").isEmpty)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: windowsDir.path) == macDir.path)
+        #expect(try CloudSaves.apply([link], prefix: prefix, home: home, user: "me").isEmpty)
+
+        try FileManager.default.removeItem(at: windowsDir)
+        try FileManager.default.createDirectory(at: windowsDir, withIntermediateDirectories: true)
+        try Data("save".utf8).write(to: windowsDir.appending(path: "slot.peak"))
+        #expect(try CloudSaves.apply([link], prefix: prefix, home: home, user: "me").count == 1)
+        #expect(FileManager.default.fileExists(atPath: windowsDir.appending(path: "slot.peak").path))
+    }
+
+    @Test(.enabled(if: FileManager.default.fileExists(atPath: Paths.steamAppInfo.path)))
+    func peakFromLocalSteamCache() throws {
+        let peak = try #require(try AppInfo.read(appID: 3527290))
+        #expect(CloudSaves.links(for: peak).first?.macPath == "unity.LandCrab.PEAK")
     }
 }

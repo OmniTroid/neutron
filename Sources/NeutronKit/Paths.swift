@@ -9,7 +9,7 @@ public struct NeutronError: Error, CustomStringConvertible {
 }
 
 public enum Paths {
-    static let home = FileManager.default.homeDirectoryForCurrentUser
+    public static let home = FileManager.default.homeDirectoryForCurrentUser
 
     public static let steam = home.appending(path: "Library/Application Support/Steam")
     public static let steamClient = steam.appending(path: "Steam.AppBundle/Steam/Contents/MacOS")

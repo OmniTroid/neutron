@@ -57,6 +57,9 @@ struct Run: ParsableCommand {
         let prefix = try prefix.map { try Prefix(url: URL(filePath: $0).standardizedFileURL, backend: backend) }
             ?? Prefix.forApp(appID, backend: backend)
         try prefix.prepare()
+        if let appID {
+            for note in try prefix.linkCloudSaves(appID: appID) { print("neutron: \(note)") }
+        }
         try exec(prefix.gameCommand(appID: appID, exe: launch.exe, workingDirectory: launch.workingDirectory,
                                     arguments: launch.arguments + args))
     }

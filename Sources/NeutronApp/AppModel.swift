@@ -160,6 +160,7 @@ final class AppModel {
                     let launch = Library.launch(try Library.game(appID: appID))
                     let prefix = try Prefix.forApp(appID, backend: backend)
                     try prefix.prepare()
+                    _ = try prefix.linkCloudSaves(appID: appID)
                     let command = prefix.gameCommand(appID: appID, exe: launch.exe,
                                                      workingDirectory: launch.workingDirectory, arguments: launch.arguments)
                     return try GameSession(prefix: prefix, command: command) { _ in

@@ -155,18 +155,28 @@ public enum AppInfo {
         return apps
     }
 
-    /// The launch option Steam would use on Windows, preferring 64-bit.
+    /// The Windows launch option to use: the default one, else a Direct3D 11 alternative (what DXMT runs),
+    /// else the first alternative; 64-bit preferred throughout.
     public static func windowsLaunch(_ appInfo: KeyValue) -> KeyValue? {
         let entries = (appInfo["config"]?["launch"]?.children ?? [])
             .sorted { (Int($0.key) ?? .max) < (Int($1.key) ?? .max) }
             .map(\.value)
             .filter { entry in
                 let config = entry["config"]
+                let type = entry["type"]?.text ?? "default"
                 return entry["executable"]?.text != nil
                     && (config?["oslist"]?.text ?? "windows").contains("windows")
-                    && ["default", "none"].contains(entry["type"]?.text ?? "default")
+                    && (["default", "none"].contains(type) || type.hasPrefix("option"))
                     && config?["betakey"] == nil
             }
-        return entries.first { $0["config"]?["osarch"]?.text == "64" } ?? entries.first
+
+        func rank(_ entry: KeyValue) -> Int {
+            let type = entry["type"]?.text ?? "default"
+            let text = [entry["description"]?.text, entry["arguments"]?.text].compactMap { $0 }.joined(separator: " ")
+            let isD3D11 = text.range(of: #"d3d11|dx11|directx ?11"#, options: [.regularExpression, .caseInsensitive]) != nil
+            let kind = ["default", "none"].contains(type) ? 0 : isD3D11 ? 1 : 2
+            return kind * 2 + (entry["config"]?["osarch"]?.text == "64" ? 0 : 1)
+        }
+        return entries.enumerated().min { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }?.element
     }
 }
