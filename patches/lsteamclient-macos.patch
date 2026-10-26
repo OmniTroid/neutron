@@ -1,3 +1,6 @@
+Neutron macOS changes to Proton's lsteamclient.
+License: Steamworks SDK License, as lsteamclient (see licenses/lsteamclient-Steamworks-SDK.txt).
+
 diff -ruN a/lsteamclient/Makefile.in b/lsteamclient/Makefile.in
 --- a/lsteamclient/Makefile.in	2026-10-26 14:47:18
 +++ b/lsteamclient/Makefile.in	2026-10-26 14:53:57

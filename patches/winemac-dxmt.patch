@@ -1,3 +1,6 @@
+Neutron macOS changes to Wine's winemac.drv for DXMT.
+License: LGPL-2.1-or-later, as Wine (see licenses/Wine-LGPL-2.1.txt).
+
 diff -ruN a/winemac.drv/Makefile.in b/winemac.drv/Makefile.in
 --- a/winemac.drv/Makefile.in	2026-09-18 22:36:23
 +++ b/winemac.drv/Makefile.in	2026-10-26 15:16:35

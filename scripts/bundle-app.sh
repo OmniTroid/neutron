@@ -27,6 +27,8 @@ cp "$ROOT/.build/release/NeutronApp" "$APP/Contents/MacOS/Neutron"
 ditto "$ROOT/.build/out/Products/Release/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 cp "$ROOT/.build/release/neutron" "$APP/Contents/Helpers/neutron"
 ditto "$ROOT/dist" "$APP/Contents/SharedSupport/dist"
+cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/"
+ditto "$ROOT/licenses" "$APP/Contents/Resources/licenses"
 
 swift "$ROOT/tools/make-icon.swift" "$ICONSET/icon_512x512@2x.png"
 for size in 16 32 128 256 512; do
