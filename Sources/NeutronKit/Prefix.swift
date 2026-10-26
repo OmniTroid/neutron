@@ -39,10 +39,7 @@ public struct Prefix: Sendable {
         self.url = url
         self.backend = backend
         dist = try Paths.dist()
-        runtime = dist.appending(path: "runtimes/\(backend.rawValue)")
-        guard FileManager.default.fileExists(atPath: runtime.path) else {
-            throw NeutronError("runtime \(runtime.path) missing, run scripts/build.sh")
-        }
+        runtime = try Runtime.url(for: backend, dist: dist)
     }
 
     public static func forApp(_ appID: UInt32?, backend: Backend) throws -> Prefix {

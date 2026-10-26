@@ -233,3 +233,39 @@ struct InstallSizeTests {
         #expect(AppInfo.windowsInstallSize(peak, is64Bit: true) == 16_440_905_716)
     }
 }
+
+struct RuntimeTests {
+    @Test func assemblesOverlayOntoBase() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        let dist = root.appending(path: "dist"), cache = root.appending(path: "cache")
+        func write(_ path: String, _ text: String) throws {
+            let url = dist.appending(path: path)
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        func read(_ url: URL) throws -> String { String(decoding: try Data(contentsOf: url), as: UTF8.self) }
+
+        try write("wine/bin/wine", "loader")
+        try write("wine/lib/wine/x86_64-windows/d3d11.dll", "wined3d")
+        try write("overlays/dxmt/lib/wine/x86_64-windows/d3d11.dll", "dxmt")
+        try write("overlays/dxmt/lib/wine/x86_64-unix/winemetal.so", "metal")
+
+        #expect(try Runtime.url(for: .wined3d, dist: dist, cache: cache) == dist.appending(path: "wine"))
+        let dxmt = try Runtime.url(for: .dxmt, dist: dist, cache: cache)
+        #expect(try read(dxmt.appending(path: "lib/wine/x86_64-windows/d3d11.dll")) == "dxmt")
+        #expect(try read(dxmt.appending(path: "lib/wine/x86_64-unix/winemetal.so")) == "metal")
+        #expect(try read(dxmt.appending(path: "bin/wine")) == "loader")
+        #expect(try read(dist.appending(path: "wine/lib/wine/x86_64-windows/d3d11.dll")) == "wined3d")
+
+        let marker = dxmt.appending(path: "marker")
+        try Data().write(to: marker)
+        _ = try Runtime.url(for: .dxmt, dist: dist, cache: cache)
+        #expect(fm.fileExists(atPath: marker.path), "unchanged inputs reuse the assembled runtime")
+
+        try write("overlays/dxmt/lib/wine/x86_64-windows/d3d11.dll", "dxmt v2")
+        let updated = try Runtime.url(for: .dxmt, dist: dist, cache: cache)
+        #expect(try read(updated.appending(path: "lib/wine/x86_64-windows/d3d11.dll")) == "dxmt v2")
+        #expect(!fm.fileExists(atPath: updated.appending(path: "marker").path))
+    }
+}

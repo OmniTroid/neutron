@@ -64,12 +64,12 @@ mkdir -p "$OBJ"
     --without-capi --without-ffmpeg > configure.log)
 make -C "$OBJ" -j"$JOBS" -s dlls/lsteamclient/all dlls/steamclient/all programs/steam/all dlls/winemac.drv/all
 
-# Runtimes
+# dist/wine is the base runtime (wined3d); overlays/<backend> holds files that replace or add to it
 rm -rf "$DIST"
-mkdir -p "$DIST/runtimes" "$DIST/steam" "$B/unpack"
+mkdir -p "$DIST/steam" "$B/unpack"
 rm -rf "$B/unpack/wine"
 tar -xJf "$B/dl/wine-bin/$(basename "$WINE_BIN_URL")" -C "$B/unpack"
-BASE="$DIST/runtimes/wined3d"
+BASE="$DIST/wine"
 mv "$B/unpack/"*.app/Contents/Resources/wine "$BASE"
 rm -rf "$B/unpack/"*.app
 for arch in i386 x86_64; do
@@ -79,12 +79,12 @@ cp "$OBJ/dlls/lsteamclient/lsteamclient.so" "$BASE/lib/wine/x86_64-unix/"
 cp "$OBJ/dlls/steamclient/i386-windows/steamclient.dll" "$DIST/steam/steamclient.dll"
 cp "$OBJ/dlls/steamclient/x86_64-windows/steamclient.dll" "$DIST/steam/steamclient64.dll"
 
-DXMT="$DIST/runtimes/dxmt"
-cp -cR "$BASE" "$DXMT"
+DXMT="$DIST/overlays/dxmt/lib/wine"
 tar -xzf "$B/dl/dxmt/$(basename "$DXMT_URL")" -C "$B/unpack"
 for d in i386-windows x86_64-windows x86_64-unix; do
-    cp "$B/unpack/$DXMT_VERSION/$d/"* "$DXMT/lib/wine/$d/"
+    mkdir -p "$DXMT/$d"
+    cp "$B/unpack/$DXMT_VERSION/$d/"* "$DXMT/$d/"
 done
-cp "$OBJ/dlls/winemac.drv/winemac.so" "$DXMT/lib/wine/x86_64-unix/"
+cp "$OBJ/dlls/winemac.drv/winemac.so" "$DXMT/x86_64-unix/"
 
 echo "built $DIST"

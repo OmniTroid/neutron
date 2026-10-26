@@ -22,8 +22,10 @@ public enum Paths {
     public static let library = neutron.appending(path: "library")
     public static let config = neutron.appending(path: "config.json")
     public static let depotDownloader = neutron.appending(path: "depotdownloader/DepotDownloader")
+    public static let runtimes = neutron.appending(path: "runtimes")
 
-    /// Built runtimes: $NEUTRON_DIST, else the nearest `dist/` above the executable (a repo checkout).
+    /// Built runtimes: $NEUTRON_DIST, else the app bundle's SharedSupport/dist, else the nearest `dist/`
+    /// above the executable (a repo checkout).
     public static func dist() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["NEUTRON_DIST"] {
             return URL(filePath: override)
@@ -31,8 +33,8 @@ public enum Paths {
         var dir = (Bundle.main.executableURL ?? URL(filePath: CommandLine.arguments[0]))
             .resolvingSymlinksInPath().deletingLastPathComponent()
         while dir.path != "/" {
-            let candidate = dir.appending(path: "dist")
-            if FileManager.default.fileExists(atPath: candidate.appending(path: "runtimes").path) {
+            for candidate in [dir.appending(path: "SharedSupport/dist"), dir.appending(path: "dist")]
+            where FileManager.default.fileExists(atPath: candidate.appending(path: "wine/bin/wine").path) {
                 return candidate
             }
             dir = dir.deletingLastPathComponent()
