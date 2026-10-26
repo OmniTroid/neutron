@@ -29,6 +29,8 @@ cp "$ROOT/.build/release/neutron" "$APP/Contents/Helpers/neutron"
 ditto "$ROOT/dist" "$APP/Contents/SharedSupport/dist"
 cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/"
 ditto "$ROOT/licenses" "$APP/Contents/Resources/licenses"
+# some upstream license files are read-only, which Sparkle flags when building updates
+chmod -R u+w,a+r "$APP/Contents/Resources/LICENSE" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/licenses"
 
 swift "$ROOT/tools/make-icon.swift" "$ICONSET/icon_512x512@2x.png"
 for size in 16 32 128 256 512; do
@@ -89,16 +91,35 @@ done
 "${SIGN[@]}" "$APP"
 codesign --verify --strict --deep "$APP"
 
+notarize() {
+    local result
+    result=$(xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json)
+    [ "$(plutil -extract status raw - <<< "$result")" = "Accepted" ] || { echo "notarization failed: $result" >&2; exit 1; }
+}
+
+NOTARIZE=false
 if [ -n "$IDENTITY" ] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-    ZIP="$ROOT/build/Neutron-notarize.zip"
-    ditto -c -k --keepParent "$APP" "$ZIP"
-    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$APP"
-    rm "$ZIP"
+    NOTARIZE=true
 elif [ -n "$IDENTITY" ]; then
     echo "not notarized: create the profile once with"
     echo "  xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <apple-id> --team-id $TEAM_ID"
 fi
 
+# the app is stapled before it goes into the DMG so it also launches offline once copied out
+if $NOTARIZE; then
+    ZIP="$ROOT/build/Neutron-notarize.zip"
+    ditto -c -k --keepParent "$APP" "$ZIP"
+    notarize "$ZIP"
+    xcrun stapler staple "$APP"
+    rm "$ZIP"
+fi
+
 hdiutil create -volname Neutron -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
+if [ -n "$IDENTITY" ]; then
+    codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+fi
+if $NOTARIZE; then
+    notarize "$DMG"
+    xcrun stapler staple "$DMG"
+fi
 echo "built $APP and $DMG (version $VERSION, build $BUILD)"
