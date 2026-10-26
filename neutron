@@ -2,29 +2,32 @@
 """Run Windows Steam games on macOS through Wine, bridged to the native Steam client."""
 
 import argparse
+import hashlib
 import io
 import json
 import os
-import re
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
-import tarfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 BACKENDS = ("dxmt", "wined3d")
-STEAM_CLIENT_DIR = Path.home() / "Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
+STEAM_DIR = Path.home() / "Library/Application Support/Steam"
+STEAM_CLIENT_DIR = STEAM_DIR / "Steam.AppBundle/Steam/Contents/MacOS"
+STEAM_APPINFO = STEAM_DIR / "appcache/appinfo.vdf"
 NEUTRON = Path.home() / "Library/Application Support/Neutron"
 PREFIXES = NEUTRON / "prefixes"
 LIBRARY = NEUTRON / "library"
 CONFIG = NEUTRON / "config.json"
-STEAMCMD_DIR = NEUTRON / "steamcmd"
-STEAMCMD_HOME = NEUTRON / "steamcmd-home"
-STEAMCMD_URL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz"
+DEPOTDOWNLOADER = NEUTRON / "depotdownloader/DepotDownloader"
+DEPOTDOWNLOADER_URL = "https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip"
+DEPOTDOWNLOADER_SHA256 = "60e80c7c496f3f9a079cd3c62036b35d088c27bc0149baf38f009eb57a52f6a5"
 PFX_STEAM_DIR = "drive_c/Program Files (x86)/Steam"
 
 STEAM_REG = r"""Windows Registry Editor Version 5.00
@@ -85,25 +88,67 @@ def setup_prefix(prefix, backend, env):
     stamp_file.write_text(stamp)
 
 
-def parse_vdf(text):
-    """Parse Valve KeyValues text into nested dicts."""
-    root = {}
-    stack, key = [root], None
-    for string, brace in re.findall(r'"((?:[^"\\]|\\.)*)"|([{}])', text):
-        if brace == "{":
-            stack[-1][key] = {}
-            stack.append(stack[-1][key])
-            key = None
-        elif brace == "}":
-            stack.pop()
-            if len(stack) == 1:
-                break
-        elif key is None:
-            key = re.sub(r"\\(.)", r"\1", string)
+def _cstr(data, pos):
+    end = data.index(b"\0", pos)
+    return data[pos:end].decode("utf-8", "replace"), end + 1
+
+
+def parse_binary_vdf(data, pos, strings):
+    """Parse binary KeyValues; keys are string-table indices when strings is given (appinfo v29)."""
+    obj = {}
+    while True:
+        kind = data[pos]
+        pos += 1
+        if kind == 0x08:
+            return obj, pos
+        if strings is None:
+            key, pos = _cstr(data, pos)
         else:
-            stack[-1][key] = re.sub(r"\\(.)", r"\1", string)
-            key = None
-    return root
+            key = strings[struct.unpack_from("<I", data, pos)[0]]
+            pos += 4
+        if kind == 0x00:
+            obj[key], pos = parse_binary_vdf(data, pos, strings)
+        elif kind == 0x01:
+            obj[key], pos = _cstr(data, pos)
+        elif kind in (0x02, 0x04, 0x06):
+            obj[key] = struct.unpack_from("<i", data, pos)[0]
+            pos += 4
+        elif kind == 0x03:
+            obj[key] = struct.unpack_from("<f", data, pos)[0]
+            pos += 4
+        elif kind in (0x07, 0x0A):
+            obj[key] = struct.unpack_from("<q", data, pos)[0]
+            pos += 8
+        else:
+            raise ValueError(f"unknown KeyValues type {kind:#x} at {pos - 1}")
+
+
+def read_appinfo(appid, path=STEAM_APPINFO):
+    """Read one app's info from the Steam client's appinfo.vdf cache (v28/v29)."""
+    data = path.read_bytes()
+    magic = struct.unpack_from("<I", data, 0)[0]
+    if magic == 0x07564429:
+        table = struct.unpack_from("<q", data, 8)[0]
+        count = struct.unpack_from("<I", data, table)[0]
+        strings, p = [], table + 4
+        for _ in range(count):
+            string, p = _cstr(data, p)
+            strings.append(string)
+        pos = 16
+    elif magic == 0x07564428:
+        strings, pos = None, 8
+    else:
+        sys.exit(f"neutron: unsupported appinfo.vdf version {magic:#x}")
+
+    while True:
+        entry_id, size = struct.unpack_from("<II", data, pos)
+        if entry_id == 0:
+            return None
+        if entry_id == appid:
+            # skip info state, last updated, PICS token, text SHA-1, change number, binary SHA-1
+            info = parse_binary_vdf(data, pos + 8 + 60, strings)[0]
+            return info.get("appinfo", info)
+        pos += 8 + size
 
 
 def launch_entry(appinfo):
@@ -116,7 +161,7 @@ def launch_entry(appinfo):
                 and not config.get("betakey"))
 
     entries = [e for e in appinfo.get("config", {}).get("launch", {}).values() if usable(e)]
-    entries.sort(key=lambda e: e.get("config", {}).get("osarch") != "64")
+    entries.sort(key=lambda e: str(e.get("config", {}).get("osarch")) != "64")
     return entries[0] if entries else None
 
 
@@ -124,56 +169,42 @@ def load_config():
     return json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
 
 
-def steamcmd(*commands, capture=False):
-    if not (STEAMCMD_DIR / "steamcmd.sh").exists():
-        STEAMCMD_DIR.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(STEAMCMD_URL) as resp:
-            tarfile.open(fileobj=io.BytesIO(resp.read())).extractall(STEAMCMD_DIR, filter="data")
-    STEAMCMD_HOME.mkdir(parents=True, exist_ok=True)
-    # on macOS, steamcmd otherwise shares ~/Library/Application Support/Steam with the running Steam client
-    env = dict(os.environ, HOME=str(STEAMCMD_HOME))
-    cmd = [str(STEAMCMD_DIR / "steamcmd.sh"), *commands, "+quit"]
-    if not capture:
-        return subprocess.run(cmd, env=env).returncode, ""
-    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-    output = []
-    for line in proc.stdout:
-        sys.stdout.write(line)
-        output.append(line)
-    return proc.wait(), "".join(output)
-
-
-def steam_user(args):
-    user = args.user or load_config().get("user")
-    if not user:
-        sys.exit("neutron: no Steam account, run `neutron login <user>` first")
-    return user
-
-
-def cmd_login(args):
-    code, _ = steamcmd("+login", args.user)
-    if code:
-        sys.exit(code)
-    NEUTRON.mkdir(parents=True, exist_ok=True)
-    CONFIG.write_text(json.dumps({**load_config(), "user": args.user}, indent=2))
+def depotdownloader():
+    if not DEPOTDOWNLOADER.exists():
+        with urllib.request.urlopen(DEPOTDOWNLOADER_URL) as resp:
+            archive = resp.read()
+        if hashlib.sha256(archive).hexdigest() != DEPOTDOWNLOADER_SHA256:
+            sys.exit("neutron: DepotDownloader checksum mismatch")
+        DEPOTDOWNLOADER.parent.mkdir(parents=True, exist_ok=True)
+        zipfile.ZipFile(io.BytesIO(archive)).extract(DEPOTDOWNLOADER.name, DEPOTDOWNLOADER.parent)
+        DEPOTDOWNLOADER.chmod(0o755)
+    return DEPOTDOWNLOADER
 
 
 def cmd_install(args):
-    user = steam_user(args)
+    config = load_config()
+    user = args.user or config.get("user")
+    if not user:
+        sys.exit("neutron: pass --user <steam-user> the first time")
+
+    appinfo = read_appinfo(args.appid)
+    if not appinfo:
+        sys.exit(f"neutron: Steam has no info for {args.appid} yet, open it in your Steam library first")
+    entry = launch_entry(appinfo)
+    if not entry:
+        sys.exit(f"neutron: no Windows launch option found for {args.appid}")
+
     install_dir = LIBRARY / str(args.appid)
     install_dir.mkdir(parents=True, exist_ok=True)
+    osarch = "32" if str(entry.get("config", {}).get("osarch")) == "32" else "64"
+    cmd = [str(depotdownloader()), "-app", str(args.appid), "-os", "windows", "-osarch", osarch,
+           "-dir", str(install_dir), "-username", user, "-remember-password", "-validate"]
+    if subprocess.run(cmd, cwd=DEPOTDOWNLOADER.parent).returncode:
+        sys.exit(f"neutron: download of {args.appid} failed")
 
-    _, output = steamcmd("+@sSteamCmdForcePlatformType", "windows", "+force_install_dir", str(install_dir),
-                         "+login", user, "+app_update", str(args.appid), "validate", capture=True)
-    if f"Success! App '{args.appid}' fully installed" not in output:
-        sys.exit(f"neutron: install of {args.appid} failed")
-
-    _, output = steamcmd("+login", user, "+app_info_update", "1", "+app_info_print", str(args.appid), capture=True)
-    start = re.search(rf'^\s*"{args.appid}"\s*$', output, re.MULTILINE)
-    appinfo = parse_vdf(output[start.start():]).get(str(args.appid)) if start else None
-    if not appinfo or not launch_entry(appinfo):
-        sys.exit(f"neutron: no Windows launch option found for {args.appid}")
     (install_dir / "neutron-appinfo.json").write_text(json.dumps(appinfo, indent=2))
+    NEUTRON.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(json.dumps({**config, "user": user}, indent=2))
     print(f"installed {appinfo.get('common', {}).get('name', args.appid)} to {install_dir}")
 
 
@@ -217,13 +248,9 @@ def main():
     parser = argparse.ArgumentParser(prog="neutron")
     sub = parser.add_subparsers(required=True)
 
-    login = sub.add_parser("login", help="log steamcmd into a Steam account (interactive, cached afterwards)")
-    login.add_argument("user")
-    login.set_defaults(func=cmd_login)
-
     install = sub.add_parser("install", help="download a game's Windows build")
     install.add_argument("appid", type=int)
-    install.add_argument("--user")
+    install.add_argument("--user", help="Steam account; prompts for login once, remembered afterwards")
     install.set_defaults(func=cmd_install)
 
     run = sub.add_parser("run", help="launch an installed game, or an exe, through the Steam bridge")
