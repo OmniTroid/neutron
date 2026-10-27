@@ -8,11 +8,12 @@ Status: proof of concept works headless; VAC itself is still untested.
   which DXMT doesn't support yet; the software path never reaches the window). Its UI runs fine though.
 - The prefix uses Wine's null display driver, seeded before the prefix exists: no window appears at any point,
   including Wine's own setup. A fresh install reaches the login screen in about a minute.
-- Neutron drives the client over Chromium DevTools (`.cef-enable-remote-debugging`, 127.0.0.1:8080): sign-in state
+- Neutron drives the client over Chromium DevTools (`-cef-enable-debugging -devtools-port <random free port>`,
+  loopback only, recorded in the prefix for later commands): sign-in state
   from `g_PopupManager`, login by reading the QR image from the hidden login page, shutdown and launch through
   `SteamClient`. Chromium's sandbox stays on.
 - Runtime is wine-staging 11.18; Steam still crashes now and then while updating itself, so `start` relaunches it.
-- Open: the DevTools port is unauthenticated and fixed at 8080 (plan: use it only for the one-time QR login, then
+- Open: the DevTools port is unauthenticated (plan: use it only for the one-time QR login, then
   drop the marker and use `-applaunch`, `steam://install` and the `ActiveUser`/`RunningAppID` registry values);
   install and launch need a signed-in account to test; prompts Steam shows (Steam Guard, EULAs) must be relayed.
 

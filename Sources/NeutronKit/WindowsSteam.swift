@@ -9,7 +9,6 @@ public struct WindowsSteam: Sendable {
     public let prefix: URL
     public let wine: URL
     static let installerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
-    static let devTools = URL(string: "http://127.0.0.1:8080")!
     // Chromium's software path is the one that runs under Wine; its GPU path needs cross-process swap chains
     static let launchFlags = ["-cef-disable-gpu", "-cef-disable-gpu-compositing", "-silent"]
 
@@ -28,6 +27,18 @@ public struct WindowsSteam: Sendable {
     }
 
     var steamDir: URL { prefix.appending(path: "drive_c/Program Files (x86)/Steam") }
+    var portFile: URL { prefix.appending(path: "neutron-devtools-port") }
+
+    /// DevTools of the instance Neutron last started; Steam keeps its launch arguments across self-restarts.
+    var devTools: DevTools? {
+        (try? String(contentsOf: portFile, encoding: .utf8)).flatMap { UInt16($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .map(DevTools.init(port:))
+    }
+
+    func requireDevTools() throws -> DevTools {
+        guard let devTools else { throw NeutronError("Windows Steam isn't running; run `neutron windows-steam start`") }
+        return devTools
+    }
     var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = prefix.path
@@ -65,12 +76,12 @@ public struct WindowsSteam: Sendable {
                 throw NeutronError("Windows Steam installer failed")
             }
         }
-        // Steam reads this marker at startup and opens DevTools on 127.0.0.1:8080
-        fm.createFile(atPath: steamDir.appending(path: ".cef-enable-remote-debugging").path, contents: nil)
+        // this marker would make Steam also open DevTools on the fixed port 8080
+        try? fm.removeItem(at: steamDir.appending(path: ".cef-enable-remote-debugging"))
     }
 
     public var isRunning: Bool {
-        get async { (try? await DevTools.targets()) != nil }
+        get async { (try? await devTools?.targets()) != nil }
     }
 
     /// Starts the client and waits until its UI is up. The first start downloads ~600 MB of updates, during
@@ -78,6 +89,7 @@ public struct WindowsSteam: Sendable {
     public func start(timeout: Duration = .seconds(900)) async throws {
         try await installIfNeeded()
         if await isRunning { return }
+        try String(try DevTools.freeLoopbackPort()).write(to: portFile, atomically: true, encoding: .utf8)
         let deadline = ContinuousClock.now + timeout
         var launches = 0
         var process: Process?
@@ -103,6 +115,7 @@ public struct WindowsSteam: Sendable {
         let process = Process()
         process.executableURL = wine
         process.arguments = [steamDir.appending(path: "Steam.exe").path] + WindowsSteam.launchFlags
+            + ["-cef-enable-debugging", "-devtools-port", String(try requireDevTools().port)]
         process.environment = environment
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -124,14 +137,15 @@ public struct WindowsSteam: Sendable {
     }
 
     public func stop() async {
-        _ = try? await DevTools.evaluate(in: "SharedJSContext", "SteamClient.User.StartShutdown(false)")
+        _ = try? await devTools?.evaluate(in: "SharedJSContext", "SteamClient.User.StartShutdown(false)")
         try? await Task.sleep(for: .seconds(5))
         _ = try? run(wine.deletingLastPathComponent().appending(path: "wineserver"), ["-k"], env: environment)
+        try? FileManager.default.removeItem(at: portFile)
     }
 
     func popupNames() async -> [String] {
         let script = "JSON.stringify([...(window.g_PopupManager?.GetPopups() ?? [])].map(p => p.m_strName))"
-        guard case .string(let json)? = try? await DevTools.evaluate(in: "SharedJSContext", script),
+        guard case .string(let json)? = try? await devTools?.evaluate(in: "SharedJSContext", script),
               let names = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) else { return [] }
         return names
     }
@@ -151,7 +165,7 @@ public struct WindowsSteam: Sendable {
               return c.toDataURL('image/png');
             })()
             """
-        guard case .string(let dataURL)? = try await DevTools.evaluate(in: "Sign in to Steam", script),
+        guard case .string(let dataURL)? = try await requireDevTools().evaluate(in: "Sign in to Steam", script),
               let base64 = dataURL.split(separator: ",").last,
               let png = Data(base64Encoded: String(base64)) else { return nil }
         return WindowsSteam.modules(fromPNG: png)
@@ -169,18 +183,18 @@ public struct WindowsSteam: Sendable {
               setTimeout(() => resolve(null), 2000);
             })
             """
-        guard case .string(let name)? = try? await DevTools.evaluate(in: "SharedJSContext", script), !name.isEmpty else { return nil }
+        guard case .string(let name)? = try? await devTools?.evaluate(in: "SharedJSContext", script), !name.isEmpty else { return nil }
         return name
     }
 
     // MARK: Games
 
     public func launch(appID: UInt32) async throws {
-        _ = try await DevTools.evaluate(in: "SharedJSContext", "SteamClient.Apps.RunGame('\(appID)', '', -1, 100)")
+        _ = try await requireDevTools().evaluate(in: "SharedJSContext", "SteamClient.Apps.RunGame('\(appID)', '', -1, 100)")
     }
 
     public func install(appID: UInt32) async throws {
-        _ = try await DevTools.evaluate(in: "SharedJSContext", "SteamClient.Installs.OpenInstallWizard([\(appID)])")
+        _ = try await requireDevTools().evaluate(in: "SharedJSContext", "SteamClient.Installs.OpenInstallWizard([\(appID)])")
     }
 
     static func modules(fromPNG png: Data) -> [[Bool]]? {
@@ -197,7 +211,7 @@ public struct WindowsSteam: Sendable {
 }
 
 /// Minimal Chromium DevTools client for Steam's CEF pages.
-public enum DevTools {
+public struct DevTools: Sendable {
     public struct Target: Decodable, Sendable {
         public let title: String
         public let type: String
@@ -212,25 +226,44 @@ public enum DevTools {
         case other(String)
     }
 
-    public static func targets() async throws -> [Target] {
-        // a fresh connection each time: before Steam binds 127.0.0.1:8080 another server on *:8080 may answer,
-        // and a pooled keep-alive connection would keep going there
+    public let port: UInt16
+
+    public func targets() async throws -> [Target] {
+        // a fresh connection each time, so a pooled keep-alive connection can't stick to whoever answered first
         let session = URLSession(configuration: .ephemeral)
         defer { session.finishTasksAndInvalidate() }
-        var request = URLRequest(url: WindowsSteam.devTools.appending(path: "json/list"))
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/json/list")!)
         request.timeoutInterval = 3
         let (data, _) = try await session.data(for: request)
         return try JSONDecoder().decode([Target].self, from: data)
     }
 
-    public static func evaluate(in title: String, _ expression: String) async throws -> Value? {
+    /// An unused loopback port: bind port 0 and read back what the OS picked.
+    public static func freeLoopbackPort() throws -> UInt16 {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw NeutronError("socket failed") }
+        defer { close(fd) }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, length) == 0 && getsockname(fd, $0, &length) == 0
+            }
+        }
+        guard bound else { throw NeutronError("couldn't find a free port") }
+        return UInt16(bigEndian: address.sin_port)
+    }
+
+    public func evaluate(in title: String, _ expression: String) async throws -> Value? {
         guard let target = try await targets().first(where: { $0.title == title }) else {
             throw NeutronError("Steam page \"\(title)\" isn't open")
         }
         return try await evaluate(in: target, expression)
     }
 
-    public static func evaluate(in target: Target, _ expression: String) async throws -> Value? {
+    public func evaluate(in target: Target, _ expression: String) async throws -> Value? {
         guard let url = target.webSocketDebuggerUrl else { throw NeutronError("\(target.title) has no debugger") }
         let socket = URLSession.shared.webSocketTask(with: url)
         socket.resume()
