@@ -1,9 +1,10 @@
 Neutron macOS changes to Proton's lsteamclient.
 License: Steamworks SDK License, as lsteamclient (see licenses/lsteamclient-Steamworks-SDK.txt).
 
-diff -ruN a/lsteamclient/Makefile.in b/lsteamclient/Makefile.in
---- a/lsteamclient/Makefile.in	2026-10-26 14:47:18
-+++ b/lsteamclient/Makefile.in	2026-10-26 14:53:57
+diff --git a/lsteamclient/Makefile.in b/lsteamclient/Makefile.in
+index a3239f52..099d2a8e 100644
+--- a/lsteamclient/Makefile.in
++++ b/lsteamclient/Makefile.in
 @@ -1,8 +1,9 @@
  MODULE    = lsteamclient.dll
  UNIXLIB   = lsteamclient.so
@@ -15,10 +16,11 @@ diff -ruN a/lsteamclient/Makefile.in b/lsteamclient/Makefile.in
  
  SOURCES = \
  	steam_input_manual.c \
-diff -ruN a/lsteamclient/unix_steam_input_manual.cpp b/lsteamclient/unix_steam_input_manual.cpp
---- a/lsteamclient/unix_steam_input_manual.cpp	2026-10-26 14:47:18
-+++ b/lsteamclient/unix_steam_input_manual.cpp	2026-10-26 14:53:27
-@@ -192,6 +192,75 @@
+diff --git a/lsteamclient/unix_steam_input_manual.cpp b/lsteamclient/unix_steam_input_manual.cpp
+index 90645561..2cebb54f 100644
+--- a/lsteamclient/unix_steam_input_manual.cpp
++++ b/lsteamclient/unix_steam_input_manual.cpp
+@@ -192,6 +192,75 @@ uint32_t manual_convert_nNativeKeyCode( uint32_t win_vk )
          return vk_to_xkeysym[win_vk];
      return 0;
  }
@@ -94,128 +96,11 @@ diff -ruN a/lsteamclient/unix_steam_input_manual.cpp b/lsteamclient/unix_steam_i
  #else
  #error You must implement VK<->Native keysym conversion for this platform.
  #endif
-diff -ruN a/lsteamclient/unix_wine_paths.h b/lsteamclient/unix_wine_paths.h
---- a/lsteamclient/unix_wine_paths.h	1970-01-01 01:00:00
-+++ b/lsteamclient/unix_wine_paths.h	2026-10-26 14:53:08
-@@ -0,0 +1,103 @@
-+/* Upstream Wine keeps these ntdll.so path helpers internal; Proton's Wine exports them. */
-+
-+#include <limits.h>
-+#include <string>
-+
-+static bool get_drive_root( char letter, char root[PATH_MAX] )
-+{
-+    const char *prefix = getenv( "WINEPREFIX" );
-+    std::string link = prefix ? prefix : std::string( getenv( "HOME" ) ) + "/.wine";
-+    link += "/dosdevices/";
-+    link += letter;
-+    link += ':';
-+    return realpath( link.c_str(), root ) != NULL;
-+}
-+
-+static NTSTATUS wine_unix_to_nt_file_name( const char *name, WCHAR *buffer, ULONG *size )
-+{
-+    char resolved[PATH_MAX], root[PATH_MAX], drive = 0;
-+    size_t best_len = 0;
-+    std::string nt;
-+    std::vector<WCHAR> ntW;
-+    ULONG len;
-+
-+    if (!realpath( name, resolved ))
-+    {
-+        if (strlen( name ) >= sizeof(resolved)) return STATUS_OBJECT_NAME_INVALID;
-+        strcpy( resolved, name );
-+    }
-+
-+    for (char c = 'a'; c <= 'z'; c++)
-+    {
-+        size_t root_len;
-+        if (!get_drive_root( c, root )) continue;
-+        root_len = strcmp( root, "/" ) ? strlen( root ) : 0;
-+        if (strncmp( resolved, root, root_len ) || (resolved[root_len] && resolved[root_len] != '/')) continue;
-+        if (!drive || root_len > best_len)
-+        {
-+            drive = c;
-+            best_len = root_len;
-+        }
-+    }
-+
-+    if (drive)
-+    {
-+        nt = "\\??\\";
-+        nt += (char)(drive - 'a' + 'A');
-+        nt += ':';
-+        nt += resolved[best_len] ? resolved + best_len : "/";
-+    }
-+    else nt = std::string( "\\??\\unix" ) + resolved;
-+    for (char &ch : nt) if (ch == '/') ch = '\\';
-+
-+    ntW.resize( nt.size() + 1 );
-+    len = ntdll_umbstowcs( nt.c_str(), nt.size(), ntW.data(), nt.size() );
-+    if (!buffer || *size <= len)
-+    {
-+        *size = len + 1;
-+        return STATUS_BUFFER_TOO_SMALL;
-+    }
-+    memcpy( buffer, ntW.data(), len * sizeof(WCHAR) );
-+    buffer[len] = 0;
-+    *size = len + 1;
-+    return STATUS_SUCCESS;
-+}
-+
-+static NTSTATUS wine_nt_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char *nameA, ULONG *size, UINT disposition )
-+{
-+    const UNICODE_STRING *ntW = attr->ObjectName;
-+    std::vector<char> utf8( ntW->Length / sizeof(WCHAR) * 3 + 1 );
-+    char root[PATH_MAX];
-+    std::string nt, unix_path;
-+    int len;
-+
-+    len = ntdll_wcstoumbs( ntW->Buffer, ntW->Length / sizeof(WCHAR), utf8.data(), utf8.size() - 1, FALSE );
-+    if (len < 0) return STATUS_OBJECT_NAME_INVALID;
-+    nt.assign( utf8.data(), len );
-+    if (!nt.compare( 0, 4, "\\??\\" )) nt.erase( 0, 4 );
-+
-+    if (!nt.compare( 0, 5, "unix\\" )) unix_path = nt.substr( 4 );
-+    else
-+    {
-+        char drive = 'c';
-+        if (nt.size() >= 2 && nt[1] == ':' && isalpha( (unsigned char)nt[0] ))
-+        {
-+            drive = tolower( (unsigned char)nt[0] );
-+            nt.erase( 0, 2 );
-+        }
-+        if (!get_drive_root( drive, root )) return STATUS_OBJECT_PATH_NOT_FOUND;
-+        unix_path = strcmp( root, "/" ) ? root : "";
-+        unix_path += nt;
-+    }
-+    for (char &ch : unix_path) if (ch == '\\') ch = '/';
-+    if (unix_path.empty()) unix_path = "/";
-+
-+    if (*size <= unix_path.size())
-+    {
-+        *size = unix_path.size() + 1;
-+        return STATUS_BUFFER_TOO_SMALL;
-+    }
-+    memcpy( nameA, unix_path.c_str(), unix_path.size() + 1 );
-+    *size = unix_path.size() + 1;
-+    return STATUS_SUCCESS;
-+}
-diff -ruN a/lsteamclient/unixlib.cpp b/lsteamclient/unixlib.cpp
---- a/lsteamclient/unixlib.cpp	2026-10-26 14:47:18
-+++ b/lsteamclient/unixlib.cpp	2026-10-26 14:56:34
-@@ -13,6 +13,10 @@
- #pragma makedep unix
- #endif
- 
-+#ifdef __APPLE__
-+#include "unix_wine_paths.h"
-+#endif
-+
- WINE_DEFAULT_DEBUG_CHANNEL(steamclient);
- 
- char *g_tmppath;
-@@ -791,8 +795,14 @@
+diff --git a/lsteamclient/unixlib.cpp b/lsteamclient/unixlib.cpp
+index 9d63e030..827159be 100644
+--- a/lsteamclient/unixlib.cpp
++++ b/lsteamclient/unixlib.cpp
+@@ -795,8 +795,14 @@ static NTSTATUS steamclient_init( Params *params, bool wow64 )
      LOAD_FUNC( Steam_GetAPICallResult );
      LOAD_FUNC( Steam_FreeLastCallback );
      LOAD_FUNC( Steam_ReleaseThreadLocalMemory );
@@ -230,7 +115,7 @@ diff -ruN a/lsteamclient/unixlib.cpp b/lsteamclient/unixlib.cpp
  
      TRACE( "Loaded host steamclient from %s\n", debugstr_a(path) );
      return 0;
-@@ -847,14 +857,14 @@
+@@ -851,14 +857,14 @@ static NTSTATUS steamclient_Steam_ReleaseThreadLocalMemory( Params *params, bool
  template< typename Params >
  static NTSTATUS steamclient_Steam_IsKnownInterface( Params *params, bool wow64 )
  {

@@ -24,6 +24,7 @@ if [ ! -d "$B/proton" ]; then
     git clone -q --filter=blob:none --no-checkout "$PROTON_REPO" "$B/proton"
     git -C "$B/proton" sparse-checkout set --no-cone '/lsteamclient/*' '!/lsteamclient/steamworks_sdk_*' '/steam_helper/'
 fi
+git -C "$B/proton" cat-file -e "$PROTON_COMMIT^{commit}" 2>/dev/null || git -C "$B/proton" fetch -q origin "$PROTON_COMMIT"
 git -C "$B/proton" checkout -q "$PROTON_COMMIT"
 
 # Wine source tree with our modules added
