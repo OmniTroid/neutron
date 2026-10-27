@@ -1,27 +1,17 @@
-# Draft: VAC through a background Windows Steam client
+# Windows Steam for VAC games
 
-Status: paused. The headless proof of concept below works, but controlling the client through DevTools conflicts
-with the [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) (2026-09-10), section 4.B:
-no unauthorized third-party software "in interacting with or controlling the processes or user interface of Steam".
-A conforming version runs the unmodified client with its window shown and drives it only through Valve's entry
-points (`steam://` URLs, `-applaunch`, `-silent`), as Highball does; that needs Steam's UI to render, which on
-upstream Wine waits on DXMT's cross-process swap chains ([dxmt#166](https://github.com/3Shain/dxmt/pull/166),
-[wine!11058](https://gitlab.winehq.org/wine/wine/-/merge_requests/11058)). VAC itself is still untested.
+Status: implemented, blocked on rendering, VAC untested. `neutron windows-steam start|status|install|launch|stop`
+runs Valve's unmodified Windows client with its window shown and talks to it only through Valve's entry points:
+`steam://` URLs and `-applaunch`/`-silent`/`-shutdown`, which a second `steam.exe` forwards to the running client.
+State comes from the registry values the client writes (`ActiveProcess\ActiveUser`, `AutoLoginUser`,
+`RunningAppID`). This is how Highball does it, and stays within the
+[Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) section 4.B, which an earlier
+headless proof of concept driving the client over Chromium DevTools did not (removed).
 
-## Proof of concept (`neutron windows-steam start|login|launch|stop`)
-
-- Steam's window can't be presented under Wine on macOS (Chromium's GPU path needs cross-process swap chains,
-  which DXMT doesn't support yet; the software path never reaches the window). Its UI runs fine though.
-- The prefix uses Wine's null display driver, seeded before the prefix exists: no window appears at any point,
-  including Wine's own setup. A fresh install reaches the login screen in about a minute.
-- Neutron drives the client over Chromium DevTools (`-cef-enable-debugging -devtools-port <random free port>`,
-  loopback only, recorded in the prefix for later commands): sign-in state
-  from `g_PopupManager`, login by reading the QR image from the hidden login page, shutdown and launch through
-  `SteamClient`. Chromium's sandbox stays on.
-- Runtime is wine-staging 11.18; Steam still crashes now and then while updating itself, so `start` relaunches it.
-- Open: the DevTools port is unauthenticated (plan: use it only for the one-time QR login, then
-  drop the marker and use `-applaunch`, `steam://install` and the `ActiveUser`/`RunningAppID` registry values);
-  install and launch need a signed-in account to test; prompts Steam shows (Steam Guard, EULAs) must be relayed.
+Blocker: Steam's window is black on upstream and staging Wine (Chromium needs cross-process swap chains:
+[dxmt#166](https://github.com/3Shain/dxmt/pull/166), [wine!11058](https://gitlab.winehq.org/wine/wine/-/merge_requests/11058)).
+Highball's renders on CrossOver-derived Wine with `-cef-disable-gpu`. `NEUTRON_STEAM_WINE` points Neutron at another
+Wine to test with.
 
 ## Idea
 
@@ -35,6 +25,7 @@ or bypassed. All other games keep using the lsteamclient bridge to Mac Steam.
   Valve has published no position on Wine or CrossOver. CodeWeavers rates CS2 "Runs Well" on CrossOver 26.3.0,
   but that rating covers gameplay, not VAC. ([community findings](https://github.com/piwas-21/cs2-apple-silicon/blob/main/research/steam-vac-findings.md),
   [CodeWeavers](https://www.codeweavers.com/unleash/counter-strike-2-on-mac))
+- highball-db reports Counter-Strike 2 playing online under Highball's Windows Steam (unverified here).
 - CrossOver's Wine source is LGPL and public (codeweavers.com/crossover/source); it carries the fixes that keep
   Steam's Chromium UI (steamwebhelper) working on macOS, which upstream Wine lacks.
 

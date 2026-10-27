@@ -269,3 +269,41 @@ struct RuntimeTests {
         #expect(!fm.fileExists(atPath: updated.appending(path: "marker").path))
     }
 }
+
+struct CompatDBTests {
+    @Test func entries() throws {
+        let json = #"""
+        {"source": "s", "license": "l", "games": {
+          "440": {"title": "Team Fortress 2", "status": "community", "renderer": "dxmt",
+                  "anticheat": {"names": ["VAC"], "macVerdict": "warning"}},
+          "3527290": {"title": "PEAK", "status": "verified-local", "renderer": "dxvk"},
+          "1172470": {"title": "Apex Legends", "status": "blocked-anticheat",
+                      "anticheat": {"names": ["Easy Anti-Cheat"], "macVerdict": "warning"}},
+          "1": {"title": "X", "status": "anticheat-only", "anticheat": {"names": ["BattlEye"], "macVerdict": "blocked"}}
+        }}
+        """#
+        let db = try JSONDecoder().decode(CompatDB.self, from: Data(json.utf8))
+        let tf2 = try #require(db.entry(appID: 440))
+        #expect(tf2.backend == .dxmt && tf2.usesVAC && !tf2.blocked && tf2.tested)
+        #expect(db.entry(appID: 3527290)?.backend == nil)
+        #expect(db.entry(appID: 1172470)?.blocked == true)
+        #expect(db.entry(appID: 1)?.blocked == true && db.entry(appID: 1)?.tested == false)
+        #expect(db.entry(appID: 2) == nil)
+    }
+
+    @Test func bundledDatabaseLoads() throws {
+        let url = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../data/compat.json")
+        #expect(try CompatDB.load(from: url).games.count > 1000)
+    }
+}
+
+struct WindowsSteamRegistryTests {
+    @Test func regQuery() {
+        let output = "\r\nHKEY_CURRENT_USER\\Software\\Valve\\Steam\\ActiveProcess\r\n    ActiveUser    REG_DWORD    0x3a0d4f9\r\n\r\n"
+        #expect(WindowsSteam.parseRegQuery(output, name: "ActiveUser") == "0x3a0d4f9")
+        #expect(WindowsSteam.parseRegQuery(output, name: "RunningAppID") == nil)
+        #expect(WindowsSteam.dword("0x3a0d4f9") == 0x3a0d4f9)
+        #expect(WindowsSteam.dword("440") == 440)
+        #expect(WindowsSteam.parseRegQuery("    AutoLoginUser    REG_SZ    some user\n", name: "AutoLoginUser") == "some user")
+    }
+}

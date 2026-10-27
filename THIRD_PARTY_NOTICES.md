@@ -25,6 +25,8 @@ Neutron's own code is under the BSD 3-Clause License in `LICENSE`. Full license 
 | MoltenVK | Apache-2.0 (`MoltenVK-Apache-2.0.txt`) | <https://github.com/KhronosGroup/MoltenVK> |
 | Vulkan Loader | Apache-2.0 (`SPDX-Apache-2.0.txt`) | <https://github.com/KhronosGroup/Vulkan-Loader> |
 | Sparkle 2.10.0 | MIT (`Sparkle-MIT.txt`) | <https://github.com/sparkle-project/Sparkle> |
+| highball-db game entries (`data/compat.json`) | CC0-1.0 | <https://github.com/gauthierpiarrette/highball-db> |
+| Are We Anti-Cheat Yet? data, via highball-db (`data/compat.json`) | MIT, Copyright (c) 2021 Starz0r, Curve (`highball-db-anticheat-MIT.txt`) | <https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet> |
 | swift-argument-parser 1.5.0 | Apache-2.0 with Runtime Library Exception (`swift-argument-parser-Apache-2.0.txt`) | <https://github.com/apple/swift-argument-parser> |
 
 ### Support libraries in the Wine build (built by MacPorts)

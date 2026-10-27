@@ -6,7 +6,7 @@ public struct Config: Codable, Sendable {
     public var backends: [String: String]?
 
     public func backend(for appID: UInt32) -> Backend {
-        backends?[String(appID)].flatMap(Backend.init(rawValue:)) ?? .dxmt
+        backends?[String(appID)].flatMap(Backend.init(rawValue:)) ?? CompatDB.shared?.entry(appID: appID)?.backend ?? .dxmt
     }
 
     public static func load() -> Config {

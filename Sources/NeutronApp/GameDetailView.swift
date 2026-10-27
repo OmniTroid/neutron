@@ -202,6 +202,10 @@ struct GameDetailView: View {
     private var compatibilityCard: some View {
         Card(title: "Compatibility") {
             VStack(alignment: .leading, spacing: 10) {
+                if let entry = CompatDB.shared?.entry(appID: game.appID) {
+                    compatReport(entry)
+                    Divider()
+                }
                 Picker("Graphics backend", selection: Binding(
                     get: { model.backend(for: game) },
                     set: { model.setBackend($0, for: game) }
@@ -217,6 +221,45 @@ struct GameDetailView: View {
                     .foregroundStyle(Theme.secondaryText)
             }
         }
+    }
+
+    private func compatReport(_ entry: CompatDB.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if entry.tested {
+                    badge(entry.blocked ? "Doesn't work" : entry.status == "community" ? "Community report" : "Verified",
+                          color: entry.blocked ? .red : .green)
+                }
+                if let anticheat = entry.anticheat?.names, !anticheat.isEmpty {
+                    badge(anticheat.joined(separator: ", "), color: entry.blocked ? .red : .orange)
+                }
+                if let renderer = entry.renderer {
+                    badge("Recommended: \(renderer)", color: .blue)
+                }
+            }
+            if let summary = entry.summary {
+                Text(summary).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+            }
+            if entry.usesVAC {
+                Text("VAC isn't active through Neutron; Valve's servers may treat the game as insecure.")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+            }
+            if let args = entry.launchArgs {
+                Text("Suggested launch options: \(args.joined(separator: " "))")
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.secondaryText)
+                    .textSelection(.enabled)
+            }
+            Text("From highball-db\(entry.lastVerified.map { ", verified \($0)" } ?? "")")
+                .font(.system(size: 10)).foregroundStyle(Theme.secondaryText)
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(color.opacity(0.18), in: Capsule())
+            .foregroundStyle(color)
     }
 
     private var aboutCard: some View {
