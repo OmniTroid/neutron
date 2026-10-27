@@ -1,6 +1,12 @@
 # Draft: VAC through a background Windows Steam client
 
-Status: proof of concept works headless; VAC itself is still untested.
+Status: paused. The headless proof of concept below works, but controlling the client through DevTools conflicts
+with the [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) (2026-09-10), section 4.B:
+no unauthorized third-party software "in interacting with or controlling the processes or user interface of Steam".
+A conforming version runs the unmodified client with its window shown and drives it only through Valve's entry
+points (`steam://` URLs, `-applaunch`, `-silent`), as Highball does; that needs Steam's UI to render, which on
+upstream Wine waits on DXMT's cross-process swap chains ([dxmt#166](https://github.com/3Shain/dxmt/pull/166),
+[wine!11058](https://gitlab.winehq.org/wine/wine/-/merge_requests/11058)). VAC itself is still untested.
 
 ## Proof of concept (`neutron windows-steam start|login|launch|stop`)
 
