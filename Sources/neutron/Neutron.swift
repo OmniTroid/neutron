@@ -98,13 +98,12 @@ struct WindowsSteamCommand: AsyncParsableCommand {
     )
 
     struct Start: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Install if needed and start Windows Steam, hidden.")
+        static let configuration = CommandConfiguration(abstract: "Install if needed and start Windows Steam with no windows.")
 
         func run() async throws {
             let steam = try WindowsSteam()
             print("starting Windows Steam (the first start downloads its update)…")
             try await steam.start()
-            await steam.hideWindows()
             print(await steam.isLoginScreenShown ? "running, not signed in: run `neutron windows-steam login`"
                                                   : "running, signed in as \(await steam.signedInAccount() ?? "?")")
         }

@@ -3,14 +3,15 @@ import Foundation
 import ImageIO
 
 /// The Windows Steam client, run headless in its own prefix and driven through Chromium DevTools.
-/// Proof of concept for games that need Valve's own client (VAC); its windows are kept hidden.
+/// Proof of concept for games that need Valve's own client (VAC). The prefix uses Wine's null display
+/// driver, so Steam never shows a window; its UI still runs and renders offscreen for DevTools.
 public struct WindowsSteam: Sendable {
     public let prefix: URL
     public let wine: URL
     static let installerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
     static let devTools = URL(string: "http://127.0.0.1:8080")!
-    // Chromium's software path is the one that renders under Wine; its GPU path can't present here
-    static let launchFlags = ["-cef-disable-gpu", "-cef-disable-gpu-compositing", "-cef-disable-sandbox", "-silent"]
+    // Chromium's software path is the one that runs under Wine; its GPU path needs cross-process swap chains
+    static let launchFlags = ["-cef-disable-gpu", "-cef-disable-gpu-compositing", "-silent"]
 
     public init(prefix: URL = Paths.prefixes.appending(path: "steam"), wine: URL? = nil) throws {
         self.prefix = prefix
@@ -38,8 +39,23 @@ public struct WindowsSteam: Sendable {
 
     public func installIfNeeded() async throws {
         let fm = FileManager.default
+        try fm.createDirectory(at: prefix, withIntermediateDirectories: true)
+        let userReg = prefix.appending(path: "user.reg")
+        if !fm.fileExists(atPath: userReg.path) {
+            // select the null display driver before Wine first creates the prefix, so even its setup shows nothing
+            try #"""
+                WINE REGISTRY Version 2
+                ;; All keys relative to \\User\\S-1-5-21-0-0-0-1000
+
+                #arch=win64
+
+                [Software\\Wine\\Drivers]
+                "Graphics"="null"
+
+                """#.write(to: userReg, atomically: true, encoding: .utf8)
+        }
+
         if !fm.fileExists(atPath: steamDir.appending(path: "Steam.exe").path) {
-            try fm.createDirectory(at: prefix, withIntermediateDirectories: true)
             let (data, _) = try await URLSession.shared.data(from: WindowsSteam.installerURL)
             let installer = prefix.appending(path: "SteamSetup.exe")
             try data.write(to: installer)
@@ -57,10 +73,33 @@ public struct WindowsSteam: Sendable {
         get async { (try? await DevTools.targets()) != nil }
     }
 
-    /// Starts the client (first start downloads its ~600 MB update) and waits until DevTools answers.
-    public func start(timeout: Duration = .seconds(600)) async throws {
+    /// Starts the client and waits until its UI is up. The first start downloads ~600 MB of updates, during
+    /// which Steam restarts itself and, under Wine, sometimes crashes; it is relaunched and resumes.
+    public func start(timeout: Duration = .seconds(900)) async throws {
         try await installIfNeeded()
         if await isRunning { return }
+        let deadline = ContinuousClock.now + timeout
+        var launches = 0
+        var process: Process?
+        var exitedAt: ContinuousClock.Instant?
+        while ContinuousClock.now < deadline {
+            // ready once Steam's UI has decided between the login and main windows
+            if !(await popupNames()).isEmpty { return }
+
+            if let running = process, !running.isRunning, exitedAt == nil { exitedAt = .now }
+            let idle = exitedAt.map { ContinuousClock.now - $0 > .seconds(20) } ?? false
+            if process == nil || (idle && !steamProcessExists()) {
+                guard launches < 5 else { throw NeutronError("Windows Steam keeps exiting during startup") }
+                launches += 1
+                process = try launchSteam()
+                exitedAt = nil
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw NeutronError("Windows Steam didn't come up within \(timeout)")
+    }
+
+    func launchSteam() throws -> Process {
         let process = Process()
         process.executableURL = wine
         process.arguments = [steamDir.appending(path: "Steam.exe").path] + WindowsSteam.launchFlags
@@ -68,45 +107,20 @@ public struct WindowsSteam: Sendable {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
-
-        let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
-            if (try? await DevTools.targets()) != nil {
-                await hideWindows()
-                // ready once the hide hook is in and Steam has decided between the login and main windows
-                if (try? await installHideHook()) == true, !(await popupNames()).isEmpty { return }
-            }
-            try await Task.sleep(for: .milliseconds(250))
-        }
-        throw NeutronError("Windows Steam didn't come up within \(timeout)")
+        return process
     }
 
-    /// Hides every Steam window from inside Steam's always-running SharedJSContext, including windows Steam
-    /// creates later; returns false until Steam's popup manager exists.
-    @discardableResult
-    func installHideHook() async throws -> Bool {
-        let script = """
-            (() => {
-              if (window.__neutronHideHook) return true;
-              if (!window.g_PopupManager) return false;
-              const hide = p => { try { p.m_popup?.SteamClient?.Window?.HideWindow(); } catch (e) {} };
-              g_PopupManager.AddPopupCreatedCallback(p => {
-                p.m_bCreateHidden = true;
-                hide(p); setTimeout(() => hide(p), 100); setTimeout(() => hide(p), 1000);
-              });
-              for (const p of g_PopupManager.GetPopups()) hide(p);
-              window.__neutronHideHook = true;
-              return true;
-            })()
-            """
-        return try await DevTools.evaluate(in: "SharedJSContext", script) == .bool(true)
-    }
-
-    func popupNames() async -> [String] {
-        let script = "JSON.stringify([...(window.g_PopupManager?.GetPopups() ?? [])].map(p => p.m_strName))"
-        guard case .string(let json)? = try? await DevTools.evaluate(in: "SharedJSContext", script),
-              let names = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) else { return [] }
-        return names
+    /// Steam relaunches itself after updating, so the process Neutron started isn't a reliable signal.
+    func steamProcessExists() -> Bool {
+        let ps = Process()
+        ps.executableURL = URL(filePath: "/bin/ps")
+        ps.arguments = ["-axo", "command"]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        guard (try? ps.run()) != nil else { return false }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        ps.waitUntilExit()
+        return output.split(separator: "\n").contains { $0.lowercased().contains(#"steam\steam.exe"#) }
     }
 
     public func stop() async {
@@ -115,12 +129,11 @@ public struct WindowsSteam: Sendable {
         _ = try? run(wine.deletingLastPathComponent().appending(path: "wineserver"), ["-k"], env: environment)
     }
 
-    /// Hides every Steam window; call repeatedly, since Steam opens new ones (login, main window, dialogs).
-    public func hideWindows() async {
-        guard let targets = try? await DevTools.targets() else { return }
-        for target in targets where target.type == "page" && target.title != "SharedJSContext" {
-            _ = try? await DevTools.evaluate(in: target, "SteamClient.Window.HideWindow()")
-        }
+    func popupNames() async -> [String] {
+        let script = "JSON.stringify([...(window.g_PopupManager?.GetPopups() ?? [])].map(p => p.m_strName))"
+        guard case .string(let json)? = try? await DevTools.evaluate(in: "SharedJSContext", script),
+              let names = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) else { return [] }
+        return names
     }
 
     // MARK: Login
