@@ -147,6 +147,6 @@ public final class GameSession: @unchecked Sendable {
 
     /// Stops the game and everything else running in its prefix.
     public func stop() {
-        try? run(prefix.runtime.appending(path: "bin/wineserver"), ["-k"], env: prefix.environment(appID: nil))
+        _ = try? run(prefix.runtime.appending(path: "bin/wineserver"), ["-k"], env: prefix.environment(appID: nil))
     }
 }
