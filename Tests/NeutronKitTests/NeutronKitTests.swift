@@ -246,6 +246,8 @@ struct GraphicsCheckTests {
         0030:0034:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 6FFFE6BB0000: builtin
         0030:0034:trace:loaddll:free_modref Unloaded module L"C:\\windows\\system32\\d3d12.dll" : builtin
         0030:0034:trace:loaddll:free_modref Unloaded module L"C:\\windows\\system32\\wined3d.dll" : builtin
+        0038:003c:trace:loaddll:build_module Loaded L"C:\\Steam\\steamwebhelper.exe" at 140000000: native
+        0038:003c:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d12.dll" at 6FFFE6ED0000: builtin
         0040:0044:trace:loaddll:build_module Loaded L"C:\\Games\\Old\\old.exe" at 00400000: native
         0040:0044:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 7B000000: builtin
         0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\game.exe" at 00400000: native

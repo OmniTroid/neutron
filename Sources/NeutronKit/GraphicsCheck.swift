@@ -46,7 +46,9 @@ public enum GraphicsCheck {
                 processes[pid] = library
                 continue
             }
-            guard let reason = reason(library: library, native: line.hasSuffix(": native")) else { continue }
+            // Chromium's GPU info process probes Direct3D 12 and exits; Steam's fallback shows in its own logs instead
+            guard processes[pid] != "steamwebhelper.exe",
+                  let reason = reason(library: library, native: line.hasSuffix(": native")) else { continue }
             let fallback = Fallback(process: processes[pid] ?? "process \(pid)", what: library, reason: reason)
             if line.contains("Unloaded module") {
                 if let index = held.lastIndex(of: fallback) { held.remove(at: index) }
