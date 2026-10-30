@@ -1,7 +1,7 @@
 [submodule "external/wine"]
 	path = external/wine
-	url = https://github.com/OmniTroid/wine.git
+	url = git@github.com:OmniTroid/wine.git
 [submodule "external/dxmt"]
 	path = external/dxmt
-	url = https://github.com/OmniTroid/dxmt.git
+	url = git@github.com:OmniTroid/dxmt.git
 	branch = d3d9

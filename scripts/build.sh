@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds dist/: Wine (external/wine) as dist/wine and DXMT (external/dxmt) as dist/overlays/dxmt.
-# WINE_SRC / DXMT_SRC override a submodule with a local checkout, a ref of its remote, or <git URL>#<ref>.
+# WINE_SRC / DXMT_SRC override a submodule with a local checkout, a ref of its remote, or <git URL>#<ref>
+# (a local repository works as the URL).
 # Needs Homebrew bison, meson, ninja, cmake, mingw-w64, freetype, gnutls and sdl2 (headers), and Xcode's Metal toolchain.
 set -euo pipefail
 
@@ -8,25 +9,22 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/versions.env"
 B="$ROOT/build"
 
-# Source tree for submodule $1: the pinned commit, or override $2 checked out as a worktree under build/src
+# Source tree for submodule $1, given override $2: a local checkout is used as is; a ref, or <git URL>#<ref>,
+# is checked out in the submodule itself, so the build stays incremental (`git submodule update` restores the pin)
 source_tree() {
-    local name=$1 spec=$2 sub="$ROOT/external/$1" tree="$B/src/$1"
+    local name=$1 spec=$2 sub="$ROOT/external/$1"
     if [ -d "$spec" ]; then (cd "$spec" && pwd); return; fi
-    git -C "$ROOT" submodule update -q --init --recursive "external/$name" >&2 || return 1
-    if [ -z "$spec" ]; then echo "$sub"; return; fi
-    local remote=origin ref=$spec commit
-    case $spec in *#*) remote=${spec%#*} ref=${spec##*#} ;; esac
-    git -C "$sub" fetch -q "$remote" "$ref" >&2 || return 1
-    commit=$(git -C "$sub" rev-parse FETCH_HEAD) || return 1
-    # an existing worktree is moved in place, so unchanged files keep their timestamps
-    if [ -e "$tree/.git" ]; then
-        git -C "$tree" checkout -q --detach "$commit" >&2 || return 1
-    else
-        rm -rf "$tree" && git -C "$sub" worktree prune && mkdir -p "$B/src" || return 1
-        git -C "$sub" worktree add -q --detach "$tree" "$commit" >&2 || return 1
+    if [ -z "$spec" ] || [ ! -e "$sub/.git" ]; then
+        git -C "$ROOT" submodule update -q --init --recursive "external/$name" >&2 || return 1
     fi
-    git -C "$tree" submodule update -q --init --recursive >&2 || return 1
-    echo "$tree"
+    if [ -n "$spec" ]; then
+        local remote=origin ref=$spec
+        case $spec in *#*) remote=${spec%#*} ref=${spec##*#} ;; esac
+        git -C "$sub" fetch -q "$remote" "$ref" >&2 || return 1
+        git -C "$sub" checkout -q --detach FETCH_HEAD >&2 || return 1
+        git -C "$sub" submodule update -q --init --recursive >&2 || return 1
+    fi
+    echo "$sub"
 }
 WINE_SRC=$(source_tree wine "${WINE_SRC:-}")
 DXMT_SRC=$(source_tree dxmt "${DXMT_SRC:-}")
@@ -68,11 +66,12 @@ if [ ! -f "$HOSTLIBS/.done" ]; then
     touch "$HOSTLIBS/.done"
 fi
 
-# Wine
+# Wine, with one object directory per source tree so switching trees stays incremental
 OBJ="$B/wine-obj"
+[ "$WINE_SRC" = "$ROOT/external/wine" ] || OBJ="$B/wine-obj-$(echo "$WINE_SRC" | shasum | cut -c1-8)"
 WINE_INSTALL="$B/wine-install"
 if [ ! -f "$OBJ/Makefile" ] || [ "$WINE_SRC/wine/configure" -nt "$OBJ/Makefile" ] \
-    || ! grep -q "^srcdir = $WINE_SRC/wine\$" "$OBJ/Makefile"; then
+    || ! grep -qx "srcdir = $WINE_SRC/wine" "$OBJ/Makefile"; then
     rm -rf "$OBJ" && mkdir -p "$OBJ"
     (cd "$OBJ" && "$WINE_SRC/wine/configure" -q CC="clang -arch x86_64" CXX="clang++ -arch x86_64" \
         --host=x86_64-apple-darwin --enable-archs=i386,x86_64 --with-mingw --prefix="$WINE_INSTALL" \
@@ -108,10 +107,15 @@ DX="$DXMT_SRC"
 DXMT_OPTIONS=()
 grep -q "'enable_d3d9'" "$DX/meson.options" 2>/dev/null && DXMT_OPTIONS+=(-Denable_d3d9=true)
 rm -rf "$B/dxmt-install"
+DXMT_KEY="$DX $OBJ ${DXMT_OPTIONS[*]:-}"
 for arch in 64 32; do
-    rm -rf "$B/dxmt-build$arch"
-    meson setup --cross-file "$DX/build-win$arch.txt" -Dnative_llvm_path="$LLVM" -Dwine_build_path="$OBJ" ${DXMT_OPTIONS[@]+"${DXMT_OPTIONS[@]}"} \
-        --buildtype release --prefix "$B/dxmt-install" "$B/dxmt-build$arch" "$DX" >/dev/null
+    if [ "$(cat "$B/dxmt-build$arch/.neutron-source" 2>/dev/null)" != "$DXMT_KEY" ]; then
+        rm -rf "$B/dxmt-build$arch"
+        meson setup --cross-file "$DX/build-win$arch.txt" -Dnative_llvm_path="$LLVM" -Dwine_build_path="$OBJ" \
+            ${DXMT_OPTIONS[@]+"${DXMT_OPTIONS[@]}"} --buildtype release --prefix "$B/dxmt-install" \
+            "$B/dxmt-build$arch" "$DX" >/dev/null
+        echo "$DXMT_KEY" > "$B/dxmt-build$arch/.neutron-source"
+    fi
     meson compile -C "$B/dxmt-build$arch" >/dev/null
     meson install -C "$B/dxmt-build$arch" >/dev/null
 done

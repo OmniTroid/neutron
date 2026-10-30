@@ -237,21 +237,32 @@ struct SteamAppsTests {
 }
 
 struct GraphicsCheckTests {
-    @Test func flagsEverythingButDXMT() {
+    @Test func flagsRenderersOtherThanDXMT() {
         let log = #"""
         0024:0028:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\steam.exe" at 00400000: native
         0024:0028:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d11.dll" at 6FFFF0000000: builtin
+        0030:0034:trace:loaddll:build_module Loaded L"C:\\Steam\\steamwebhelper.exe" at 140000000: native
+        0030:0034:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d12.dll" at 6FFFE6ED0000: builtin
+        0030:0034:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 6FFFE6BB0000: builtin
+        0030:0034:trace:loaddll:free_modref Unloaded module L"C:\\windows\\system32\\d3d12.dll" : builtin
+        0030:0034:trace:loaddll:free_modref Unloaded module L"C:\\windows\\system32\\wined3d.dll" : builtin
         0040:0044:trace:loaddll:build_module Loaded L"C:\\Games\\Old\\old.exe" at 00400000: native
-        0040:0044:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 7B000000: builtin
         0040:0044:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 7B000000: builtin
         0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\game.exe" at 00400000: native
         0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\dxgi.dll" at 180000000: native
-        0060:0064:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\steamwebhelper.exe" at 140000000: native
-        0060:0064:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\vk_swiftshader.dll" at 180000000: native
+        err:   Failed to create metal view, it seems like your Wine has no exported symbols needed by DXMT.
         """#
         let fallbacks = GraphicsCheck.fallbacks(inLog: log)
-        #expect(fallbacks.map(\.process) == ["old.exe", "game.exe", "steamwebhelper.exe"])
-        #expect(fallbacks.map(\.library) == ["wined3d.dll", "dxgi.dll", "vk_swiftshader.dll"])
+        #expect(fallbacks.map(\.process) == ["old.exe", "game.exe", "DXMT"])
+        #expect(fallbacks.map(\.what).prefix(2) == ["wined3d.dll", "dxgi.dll"])
+    }
+
+    @Test func flagsSteamSoftwareRendering() {
+        let old = "[2026-10-30 10:00:00] Startup - webhelper launched pid: 1\n[2026-10-30 10:00:01] Disabling GPU acceleration due to --disable-gpu (browser)\n"
+        let current = "[2026-10-30 11:00:00] Startup - webhelper launched pid: 2\n[2026-10-30 11:00:01] Starting message loop\n"
+        #expect(GraphicsCheck.steamBrowserFallbacks(webhelperLog: old + current, cefLog: "").isEmpty)
+        let fallback = GraphicsCheck.steamBrowserFallbacks(webhelperLog: old, cefLog: "")
+        #expect(fallback.first?.what == "Disabling GPU acceleration due to --disable-gpu (browser)")
     }
 }
 

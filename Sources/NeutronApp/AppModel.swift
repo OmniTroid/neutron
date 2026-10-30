@@ -78,7 +78,12 @@ final class AppModel {
         Task {
             defer { startingSteam = false }
             do {
-                try await client().start()
+                let steam = try await client()
+                try await steam.start()
+                // macOS doesn't bring an app launched in the background forward, and Wine shows windows only when active
+                if let pid = await Task.detached(operation: { steam.windowProcessID() }).value {
+                    NSRunningApplication(processIdentifier: pid)?.activate()
+                }
             } catch {
                 errorMessage = "Couldn't start Steam: \(error)"
             }

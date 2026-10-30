@@ -1,3 +1,4 @@
+import AppKit
 import ArgumentParser
 import Foundation
 import NeutronKit
@@ -18,7 +19,12 @@ struct Start: AsyncParsableCommand {
 
     func run() async throws {
         print("starting Steam (the first start downloads and installs its update)…")
-        try await WindowsSteam().start(silent: silent)
+        let steam = try WindowsSteam()
+        try await steam.start(silent: silent)
+        // macOS doesn't bring an app launched in the background forward, and Wine shows windows only when active
+        if !silent, let pid = steam.windowProcessID() {
+            NSRunningApplication(processIdentifier: pid)?.activate()
+        }
         print("running; sign in through Steam's window if you haven't")
     }
 }

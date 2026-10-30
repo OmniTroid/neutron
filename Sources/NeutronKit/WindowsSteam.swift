@@ -20,6 +20,9 @@ public struct WindowsSteam: Sendable {
     public var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = prefix.path
+        // the runtime's host libraries (GnuTLS, FreeType, MoltenVK); Wine dlopens them by bare name
+        let lib = wine.deletingLastPathComponent().deletingLastPathComponent().appending(path: "lib").path
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = [lib, env["DYLD_FALLBACK_LIBRARY_PATH"]].compactMap { $0 }.joined(separator: ":")
         // loaddll shows which renderer each process loads; see GraphicsCheck
         env["WINEDEBUG"] = "-all,+pid,+loaddll"
         // DXMT, never a copy a game ships (e.g. DXVK)
@@ -45,6 +48,12 @@ public struct WindowsSteam: Sendable {
             guard try run(wine, [installer.path, "/S"], env: environment) == 0, fm.fileExists(atPath: steamExe.path) else {
                 throw NeutronError("Windows Steam installer failed")
             }
+        }
+        // steam.exe shows only hidden helper windows; the Dock icon belongs to steamwebhelper.exe's windows
+        let userReg = (try? String(contentsOf: prefix.appending(path: "user.reg"), encoding: .utf8)) ?? ""
+        if !userReg.contains(#"[Software\\Wine\\AppDefaults\\steam.exe\\Mac Driver]"#) {
+            _ = try run(wine, ["reg", "add", #"HKCU\Software\Wine\AppDefaults\steam.exe\Mac Driver"#,
+                               "/v", "ShowInDock", "/t", "REG_SZ", "/d", "N", "/f"], env: environment)
         }
     }
 
@@ -127,7 +136,27 @@ public struct WindowsSteam: Sendable {
     }
 
     public func fallbacks() -> [GraphicsCheck.Fallback] {
-        GraphicsCheck.fallbacks(inLog: (try? String(contentsOf: log, encoding: .utf8)) ?? "")
+        func read(_ url: URL) -> String { (try? String(contentsOf: url, encoding: .utf8)) ?? "" }
+        let logs = steamExe.deletingLastPathComponent().appending(path: "logs")
+        return GraphicsCheck.fallbacks(inLog: read(log))
+            + GraphicsCheck.steamBrowserFallbacks(webhelperLog: read(logs.appending(path: "webhelper.txt")),
+                                                  cefLog: read(logs.appending(path: "cef_log.txt")))
+    }
+
+    /// The Mac process that owns Steam's windows: the browser process of steamwebhelper.
+    public func windowProcessID() -> pid_t? {
+        let ps = Process()
+        ps.executableURL = URL(filePath: "/bin/ps")
+        ps.arguments = ["-axww", "-o", "pid=,command="]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        guard (try? ps.run()) != nil else { return nil }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        ps.waitUntilExit()
+        return output.split(separator: "\n").lazy
+            .filter { $0.contains("steamwebhelper.exe") && !$0.contains("--type=") }
+            .compactMap { pid_t($0.split(separator: " ").first ?? "") }
+            .first
     }
 
     public func status() throws -> Status {
