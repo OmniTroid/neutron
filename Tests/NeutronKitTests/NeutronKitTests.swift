@@ -252,11 +252,15 @@ struct GraphicsCheckTests {
         0040:0044:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 7B000000: builtin
         0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\game.exe" at 00400000: native
         0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\dxgi.dll" at 180000000: native
+        0060:0064:trace:loaddll:build_module Loaded L"C:\\Games\\DX12\\dx12.exe" at 140000000: native
+        0060:0064:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d12.dll" at 6FFFE6ED0000: builtin
+        0070:0074:trace:loaddll:build_module Loaded L"C:\\Games\\Vk\\vk.exe" at 140000000: native
+        0070:0074:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d12core.dll" at 6FFFE6ED0000: builtin
         err:   Failed to create metal view, it seems like your Wine has no exported symbols needed by DXMT.
         """#
         let fallbacks = GraphicsCheck.fallbacks(inLog: log)
-        #expect(fallbacks.map(\.process) == ["old.exe", "game.exe", "DXMT"])
-        #expect(fallbacks.map(\.what).prefix(2) == ["wined3d.dll", "dxgi.dll"])
+        #expect(fallbacks.map(\.process) == ["old.exe", "game.exe", "vk.exe", "DXMT"])
+        #expect(fallbacks.map(\.what).prefix(3) == ["wined3d.dll", "dxgi.dll", "d3d12core.dll"])
     }
 
     @Test func flagsSteamSoftwareRendering() {

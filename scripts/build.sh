@@ -106,6 +106,7 @@ fi
 DX="$DXMT_SRC"
 DXMT_OPTIONS=()
 grep -q "'enable_d3d9'" "$DX/meson.options" 2>/dev/null && DXMT_OPTIONS+=(-Denable_d3d9=true)
+grep -q "'enable_d3d12'" "$DX/meson.options" 2>/dev/null && DXMT_OPTIONS+=(-Denable_d3d12=true)
 rm -rf "$B/dxmt-install"
 DXMT_KEY="$DX $OBJ ${DXMT_OPTIONS[*]:-}"
 for arch in 64 32; do

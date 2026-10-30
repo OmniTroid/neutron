@@ -11,12 +11,13 @@ public enum GraphicsCheck {
         public var description: String { "\(process): \(what): \(reason)" }
     }
 
-    static let dxmtLibraries: Set<String> = ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"]
+    static let dxmtLibraries: Set<String> = ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "dxgi.dll"]
 
     static func reason(library: String, native: Bool) -> String? {
         switch library {
         case "wined3d.dll": "Wine's wined3d (OpenGL) instead of DXMT"
-        case "d3d12.dll", "d3d12core.dll": native ? "the program's own Direct3D 12, not DXMT" : "Wine's Direct3D 12 (vkd3d), not DXMT"
+        // DXMT's d3d12.dll replaces Wine's but has no d3d12core.dll, so a builtin one is vkd3d's
+        case "d3d12core.dll": native ? "the program's own Direct3D 12 runtime, not DXMT" : "Wine's Direct3D 12 (vkd3d), not DXMT"
         case _ where dxmtLibraries.contains(library) && native: "the program's own \(library) instead of DXMT's"
         default: nil
         }

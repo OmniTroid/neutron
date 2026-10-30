@@ -26,7 +26,7 @@ public struct WindowsSteam: Sendable {
         // loaddll shows which renderer each process loads (see GraphicsCheck); the caller's WINEDEBUG adds channels
         env["WINEDEBUG"] = ["-all,+pid,+loaddll", env["WINEDEBUG"]].compactMap { $0 }.joined(separator: ",")
         // DXMT, never a copy a game ships (e.g. DXVK)
-        env["WINEDLLOVERRIDES"] = "d3d9,d3d10core,d3d11,dxgi=b;winemenubuilder.exe=d;winedbg.exe=d"
+        env["WINEDLLOVERRIDES"] = "d3d9,d3d10core,d3d11,d3d12,dxgi=b;winemenubuilder.exe=d;winedbg.exe=d"
         // Steam's UI hangs under Wine's msync/esync
         env["WINEMSYNC"] = "0"
         env["WINEESYNC"] = "0"
