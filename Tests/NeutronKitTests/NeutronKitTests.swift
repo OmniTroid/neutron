@@ -81,27 +81,6 @@ struct AppInfoTests {
         #expect(AppInfo.windowsLaunch(macOnly) == nil)
     }
 
-    @Test func installedGameResolvesLaunch() throws {
-        let game = try #require(InstalledGame(appID: 12345, appInfo: testApp))
-        #expect(game.name == "Test Game")
-        #expect(game.is64Bit)
-
-        try FileManager.default.createDirectory(at: Library.directory(appID: 12345, library: dir), withIntermediateDirectories: true)
-        try Library.save(game, library: dir)
-        let launch = Library.launch(try Library.game(appID: 12345, library: dir), library: dir)
-        #expect(launch.exe == dir.appending(path: "12345/bin/win64/game.exe"))
-        #expect(launch.workingDirectory == dir.appending(path: "12345/bin/win64"))
-        #expect(launch.arguments == ["-dx11", "-name=a b"])
-    }
-
-    @Test(.enabled(if: FileManager.default.fileExists(atPath: Paths.steamAppInfo.path)))
-    func readsLocalSteamCache() throws {
-        let tf2 = try #require(try AppInfo.read(appID: 440))
-        let game = try #require(InstalledGame(appID: 440, appInfo: tf2))
-        #expect(game.executable == "tf_win64.exe")
-        #expect(game.is64Bit)
-    }
-
     @Test func prefersDirect3D11AlternativeWithoutDefault() {
         let peakLike: KeyValue = .object([("config", .object([("launch", .object([
             ("5", .object([("executable", .string("PEAK.exe")), ("type", .string("option1")),
@@ -112,94 +91,6 @@ struct AppInfoTests {
                            ("config", .object([("oslist", .string("windows")), ("osarch", .int(64))]))])),
         ]))]))])
         #expect(AppInfo.windowsLaunch(peakLike)?["arguments"]?.text == "-force-d3d11")
-    }
-
-    @Test func splitsQuotedArguments() {
-        #expect(Library.splitArguments(#"  -a  "b c" ""  -d"#) == ["-a", "b c", "", "-d"])
-    }
-}
-
-struct InstallSessionParsingTests {
-    @Test func parsesProgressLines() {
-        let events = InstallSession.parse(line: "42.50% /Users/x/Library/Application Support/Neutron/library/440/tf/tf2_misc_dir.vpk")
-        guard case .progress(let value) = events.first, case .status(let file) = events.last else {
-            Issue.record("expected progress and status, got \(events)")
-            return
-        }
-        #expect(value == 0.425)
-        #expect(file == "tf2_misc_dir.vpk")
-    }
-
-    @Test func detectsPrompts() {
-        #expect(InstallSession.prompt(in: #"Enter account password for "dave": "#) == .password)
-        #expect(InstallSession.prompt(in: "STEAM GUARD! Please enter your 2-factor auth code from your authenticator app: ") == .guardCode)
-        #expect(InstallSession.prompt(in: "STEAM GUARD! Please enter the auth code sent to the email at d***@gmail.com: ")
-            == .emailCode("d***@gmail.com"))
-        #expect(InstallSession.prompt(in: "Connecting to Steam3...") == nil)
-        guard case .prompt(.mobileConfirmation) = InstallSession.parse(line: "STEAM GUARD! Use the Steam Mobile App to confirm your sign in...").first else {
-            Issue.record("expected mobile confirmation prompt")
-            return
-        }
-    }
-}
-
-struct CloudSavesTests {
-    func rule(_ root: String, _ path: String, _ pattern: String, _ platform: String?) -> KeyValue {
-        var pairs: [(key: String, value: KeyValue)] = [("root", .string(root)), ("path", .string(path)), ("pattern", .string(pattern))]
-        if let platform { pairs.append(("platforms", .object([("1", .string(platform))]))) }
-        return .object(pairs)
-    }
-
-    @Test func pairsWindowsRuleWithMacRule() {
-        let peak: KeyValue = .object([("ufs", .object([("savefiles", .object([
-            ("0", rule("WinAppDataLocalLow", "LandCrab/PEAK", "*.peak", "Windows")),
-            ("1", rule("LinuxXdgConfigHome", "unity3d/LandCrab/PEAK", "*.peak", "Linux")),
-            ("2", rule("MacAppSupport", "unity.LandCrab.PEAK", "*.peak", "MacOS")),
-        ]))]))])
-        #expect(CloudSaves.links(for: peak) == [SaveLink(windowsRoot: "WinAppDataLocalLow", windowsPath: "LandCrab/PEAK",
-                                                         macRoot: "MacAppSupport", macPath: "unity.LandCrab.PEAK")])
-    }
-
-    @Test func appliesRootOverride() {
-        let game: KeyValue = .object([("ufs", .object([
-            ("savefiles", .object([("0", rule("WinMyDocuments", "My Games/Thing", "*", nil))])),
-            ("rootoverrides", .object([("0", .object([("root", .string("WinMyDocuments")), ("os", .string("MacOS")),
-                                                      ("useinstead", .string("MacAppSupport")), ("addpath", .string("Thing"))]))])),
-        ]))])
-        #expect(CloudSaves.links(for: game) == [SaveLink(windowsRoot: "WinMyDocuments", windowsPath: "My Games/Thing",
-                                                         macRoot: "MacAppSupport", macPath: "Thing/My Games/Thing")])
-    }
-
-    @Test func skipsTokensAndWindowsOnlyRules() {
-        let game: KeyValue = .object([("ufs", .object([("savefiles", .object([
-            ("0", rule("WinAppDataRoaming", "Thing/{64BitSteamID}", "*", "Windows")),
-            ("1", rule("WinAppDataRoaming", "Other", "*.sav", "Windows")),
-        ]))]))])
-        #expect(CloudSaves.links(for: game).isEmpty)
-    }
-
-    @Test func linksWithoutClobberingSaves() throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        let prefix = root.appending(path: "pfx"), home = root.appending(path: "home")
-        let link = SaveLink(windowsRoot: "WinAppDataLocalLow", windowsPath: "LandCrab/PEAK", macRoot: "MacAppSupport", macPath: "unity.LandCrab.PEAK")
-        let windowsDir = prefix.appending(path: "drive_c/users/me/AppData/LocalLow/LandCrab/PEAK")
-        let macDir = home.appending(path: "Library/Application Support/unity.LandCrab.PEAK")
-
-        #expect(try CloudSaves.apply([link], prefix: prefix, home: home, user: "me").isEmpty)
-        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: windowsDir.path) == macDir.path)
-        #expect(try CloudSaves.apply([link], prefix: prefix, home: home, user: "me").isEmpty)
-
-        try FileManager.default.removeItem(at: windowsDir)
-        try FileManager.default.createDirectory(at: windowsDir, withIntermediateDirectories: true)
-        try Data("save".utf8).write(to: windowsDir.appending(path: "slot.peak"))
-        #expect(try CloudSaves.apply([link], prefix: prefix, home: home, user: "me").count == 1)
-        #expect(FileManager.default.fileExists(atPath: windowsDir.appending(path: "slot.peak").path))
-    }
-
-    @Test(.enabled(if: FileManager.default.fileExists(atPath: Paths.steamAppInfo.path)))
-    func peakFromLocalSteamCache() throws {
-        let peak = try #require(try AppInfo.read(appID: 3527290))
-        #expect(CloudSaves.links(for: peak).first?.macPath == "unity.LandCrab.PEAK")
     }
 }
 
@@ -226,12 +117,6 @@ struct InstallSizeTests {
         #expect(AppInfo.windowsInstallSize(app, is64Bit: false) == 1050)
         #expect(AppInfo.windowsInstallSize(.object([]), is64Bit: true) == nil)
     }
-
-    @Test(.enabled(if: FileManager.default.fileExists(atPath: Paths.steamAppInfo.path)))
-    func peakSizeFromLocalSteamCache() throws {
-        let peak = try #require(try AppInfo.read(appID: 3527290))
-        #expect(AppInfo.windowsInstallSize(peak, is64Bit: true) == 16_440_905_716)
-    }
 }
 
 struct RuntimeTests {
@@ -247,12 +132,12 @@ struct RuntimeTests {
         func read(_ url: URL) throws -> String { String(decoding: try Data(contentsOf: url), as: UTF8.self) }
 
         try write("wine/bin/wine", "loader")
+        try write("wine/lib/wine/x86_64-unix/ntdll.so", "ntdll")
         try write("wine/lib/wine/x86_64-windows/d3d11.dll", "wined3d")
-        try write("overlays/dxmt/lib/wine/x86_64-windows/d3d11.dll", "dxmt")
+        for file in Runtime.dxmtFiles { try write("overlays/dxmt/\(file)", "dxmt") }
         try write("overlays/dxmt/lib/wine/x86_64-unix/winemetal.so", "metal")
 
-        #expect(try Runtime.url(for: .wined3d, dist: dist, cache: cache) == dist.appending(path: "wine"))
-        let dxmt = try Runtime.url(for: .dxmt, dist: dist, cache: cache)
+        let dxmt = try Runtime.url(dist: dist, cache: cache)
         #expect(try read(dxmt.appending(path: "lib/wine/x86_64-windows/d3d11.dll")) == "dxmt")
         #expect(try read(dxmt.appending(path: "lib/wine/x86_64-unix/winemetal.so")) == "metal")
         #expect(try read(dxmt.appending(path: "bin/wine")) == "loader")
@@ -260,11 +145,11 @@ struct RuntimeTests {
 
         let marker = dxmt.appending(path: "marker")
         try Data().write(to: marker)
-        _ = try Runtime.url(for: .dxmt, dist: dist, cache: cache)
+        _ = try Runtime.url(dist: dist, cache: cache)
         #expect(fm.fileExists(atPath: marker.path), "unchanged inputs reuse the assembled runtime")
 
         try write("overlays/dxmt/lib/wine/x86_64-windows/d3d11.dll", "dxmt v2")
-        let updated = try Runtime.url(for: .dxmt, dist: dist, cache: cache)
+        let updated = try Runtime.url(dist: dist, cache: cache)
         #expect(try read(updated.appending(path: "lib/wine/x86_64-windows/d3d11.dll")) == "dxmt v2")
         #expect(!fm.fileExists(atPath: updated.appending(path: "marker").path))
     }
@@ -284,8 +169,7 @@ struct CompatDBTests {
         """#
         let db = try JSONDecoder().decode(CompatDB.self, from: Data(json.utf8))
         let tf2 = try #require(db.entry(appID: 440))
-        #expect(tf2.backend == .dxmt && tf2.usesVAC && !tf2.blocked && tf2.tested)
-        #expect(db.entry(appID: 3527290)?.backend == nil)
+        #expect(tf2.renderer == "dxmt" && tf2.usesVAC && !tf2.blocked && tf2.tested)
         #expect(db.entry(appID: 1172470)?.blocked == true)
         #expect(db.entry(appID: 1)?.blocked == true && db.entry(appID: 1)?.tested == false)
         #expect(db.entry(appID: 2) == nil)
@@ -305,5 +189,78 @@ struct WindowsSteamRegistryTests {
         #expect(WindowsSteam.dword("0x3a0d4f9") == 0x3a0d4f9)
         #expect(WindowsSteam.dword("440") == 440)
         #expect(WindowsSteam.parseRegQuery("    AutoLoginUser    REG_SZ    some user\n", name: "AutoLoginUser") == "some user")
+    }
+}
+
+struct SteamAppsTests {
+    @Test func parsesTextKeyValues() throws {
+        let vdf = try KeyValue.parse(text: #"""
+        "libraryfolders"
+        {
+            // comment
+            "0"
+            {
+                "path"		"C:\\Program Files (x86)\\Steam"
+                "apps" { "440" "123" }
+            }
+        }
+        """#)
+        #expect(vdf["libraryfolders"]?["0"]?["path"]?.text == #"C:\Program Files (x86)\Steam"#)
+        #expect(vdf["libraryfolders"]?["0"]?["apps"]?["440"]?.text == "123")
+    }
+
+    @Test func readsManifestsFromLibraryFolders() throws {
+        let fm = FileManager.default
+        let prefix = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        let steam = prefix.appending(path: "drive_c/Program Files (x86)/Steam")
+        let steamapps = steam.appending(path: "steamapps")
+        try fm.createDirectory(at: steamapps, withIntermediateDirectories: true)
+        try fm.createDirectory(at: prefix.appending(path: "dosdevices"), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(atPath: prefix.appending(path: "dosdevices/c:").path, withDestinationPath: "../drive_c")
+        try #"""
+        "libraryfolders" { "0" { "path" "C:\\Program Files (x86)\\Steam" } }
+        """#.write(to: steamapps.appending(path: "libraryfolders.vdf"), atomically: true, encoding: .utf8)
+        try #"""
+        "AppState" { "appid" "440" "StateFlags" "4" "installdir" "Team Fortress 2" "SizeOnDisk" "100" }
+        """#.write(to: steamapps.appending(path: "appmanifest_440.acf"), atomically: true, encoding: .utf8)
+        try #"""
+        "AppState" { "appid" "730" "StateFlags" "1026" "installdir" "CS2" "BytesToDownload" "200" "BytesDownloaded" "50" }
+        """#.write(to: steamapps.appending(path: "appmanifest_730.acf"), atomically: true, encoding: .utf8)
+
+        let states = SteamApps.states(steam: steam, prefix: prefix)
+        let tf2 = try #require(states[440])
+        #expect(tf2.installed && !tf2.updating && tf2.sizeOnDisk == 100)
+        #expect(tf2.directory.resolvingSymlinksInPath() == steamapps.appending(path: "common/Team Fortress 2").resolvingSymlinksInPath())
+        let cs2 = try #require(states[730])
+        #expect(!cs2.installed && cs2.updating && cs2.progress == 0.25)
+    }
+}
+
+struct GraphicsCheckTests {
+    @Test func flagsEverythingButDXMT() {
+        let log = #"""
+        0024:0028:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\steam.exe" at 00400000: native
+        0024:0028:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d11.dll" at 6FFFF0000000: builtin
+        0040:0044:trace:loaddll:build_module Loaded L"C:\\Games\\Old\\old.exe" at 00400000: native
+        0040:0044:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 7B000000: builtin
+        0040:0044:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 7B000000: builtin
+        0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\game.exe" at 00400000: native
+        0050:0054:trace:loaddll:build_module Loaded L"C:\\Games\\New\\dxgi.dll" at 180000000: native
+        0060:0064:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\steamwebhelper.exe" at 140000000: native
+        0060:0064:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\vk_swiftshader.dll" at 180000000: native
+        """#
+        let fallbacks = GraphicsCheck.fallbacks(inLog: log)
+        #expect(fallbacks.map(\.process) == ["old.exe", "game.exe", "steamwebhelper.exe"])
+        #expect(fallbacks.map(\.library) == ["wined3d.dll", "dxgi.dll", "vk_swiftshader.dll"])
+    }
+}
+
+struct RuntimeDXMTTests {
+    @Test func refusesWithoutDXMT() throws {
+        let fm = FileManager.default
+        let dist = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        try fm.createDirectory(at: dist.appending(path: "wine/bin"), withIntermediateDirectories: true)
+        try Data().write(to: dist.appending(path: "wine/bin/wine"))
+        #expect(throws: NeutronError.self) { try Runtime.url(dist: dist, cache: dist.appending(path: "cache")) }
     }
 }

@@ -1,16 +1,22 @@
 import Foundation
 
 public enum Runtime {
-    /// The Wine runtime for `backend`: the base runtime itself for wined3d, otherwise the base with the
-    /// backend's overlay applied, assembled once under Application Support (APFS clones, so no extra space).
-    public static func url(for backend: Backend, dist: URL, cache: URL = Paths.runtimes) throws -> URL {
+    /// Files without which Wine would render with its own wined3d instead.
+    static let dxmtFiles = ["d3d10core.dll", "d3d11.dll", "dxgi.dll", "winemetal.dll"]
+        .flatMap { ["lib/wine/x86_64-windows/\($0)", "lib/wine/i386-windows/\($0)"] } + ["lib/wine/x86_64-unix/winemetal.so"]
+
+    /// The Wine runtime with DXMT applied, assembled once under Application Support (APFS clones, so no extra space).
+    public static func url(dist: URL, cache: URL = Paths.runtimes) throws -> URL {
         let base = dist.appending(path: "wine")
         guard FileManager.default.fileExists(atPath: base.appending(path: "bin/wine").path) else {
             throw NeutronError("Wine runtime missing at \(base.path), run scripts/build.sh")
         }
-        guard backend != .wined3d else { return base }
-        let overlay = dist.appending(path: "overlays/\(backend.rawValue)")
-        return try assemble(base: base, overlay: overlay, into: cache.appending(path: backend.rawValue))
+        let overlay = dist.appending(path: "overlays/dxmt")
+        let missing = dxmtFiles.filter { !FileManager.default.fileExists(atPath: overlay.appending(path: $0).path) }
+        guard missing.isEmpty else {
+            throw NeutronError("DXMT is incomplete in \(overlay.path) (missing \(missing.joined(separator: ", "))); Neutron only renders with DXMT, run scripts/build.sh")
+        }
+        return try assemble(base: base, overlay: overlay, into: cache.appending(path: "dxmt"))
     }
 
     static func assemble(base: URL, overlay: URL, into target: URL) throws -> URL {
@@ -41,8 +47,7 @@ public enum Runtime {
 
     /// Changes whenever the bundled base or overlay changes, e.g. after an app update.
     static func fingerprint(base: URL, overlay: URL) throws -> String {
-        let bridge = base.appending(path: "lib/wine/x86_64-unix/lsteamclient.so")
-        var lines = [base.path, describe(bridge)]
+        var lines = [base.path, describe(base.appending(path: "lib/wine/x86_64-unix/ntdll.so"))]
         lines += try files(in: overlay).map { "\($0) \(describe(overlay.appending(path: $0)))" }
         return lines.joined(separator: "\n")
     }
@@ -61,4 +66,17 @@ public enum Runtime {
         }
         .sorted()
     }
+}
+
+@discardableResult
+func run(_ executable: URL, _ arguments: [String], env: [String: String]) throws -> Int32 {
+    let process = Process()
+    process.executableURL = executable
+    process.arguments = arguments
+    process.environment = env
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    return process.terminationStatus
 }

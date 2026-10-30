@@ -1,11 +1,12 @@
 # Neutron
 
-Proton-style runner for Windows Steam games on Apple Silicon macOS: Wine 11 under Rosetta, DXMT for D3D10/11, and Proton's lsteamclient bridged to the native Mac Steam client.
+A macOS frontend for Valve's Windows Steam client, running unmodified under CrossOver's Wine ([OmniTroid/wine](https://github.com/OmniTroid/wine)) with DXMT ([OmniTroid/dxmt](https://github.com/OmniTroid/dxmt)) for Direct3D 10/11. Steam installs, updates and launches the games; Neutron only uses Steam's own command-line options and `steam://` URLs, as [Highball](https://github.com/gauthierpiarrette/highball) does.
 
 ```sh
+git submodule update --init --recursive
 scripts/build.sh && swift build -c release
-.build/release/neutron install <appid> --user <steam-user>
-.build/release/neutron run --appid <appid>
+.build/release/neutron start
+.build/release/neutron launch <appid>
 scripts/bundle-app.sh && open build/Neutron.app
 ```
 
@@ -17,4 +18,4 @@ scripts/release.sh 0.2
 
 Publishes a notarized build: the DMG to release `v0.2`, and the Sparkle archive, deltas and `appcast.xml` to the rolling `updates` release the app checks. Update archives are signed with the EdDSA key that `generate_keys` keeps in the login keychain.
 
-`build.sh` produces `dist/` (the Wine runtime, per-backend overlays and the Steam bridge); the `neutron` CLI and the `NeutronKit` engine it shares with the app are a Swift package. `install` downloads the Windows build with DepotDownloader into `~/Library/Application Support/Neutron/library`; `run` launches it through Proton's `steam.exe` with the Mac Steam client running. `Neutron.app` does the same from a library of your owned Windows games. `neutron compat <appid>` shows the game's entry in `data/compat.json`, generated from [highball-db](https://github.com/gauthierpiarrette/highball-db) by `scripts/update-compat-db.sh`; its recommended renderer is the default backend and blocked titles need `install --force`.
+`build.sh` builds the `external/` submodules into `dist/`; `WINE_SRC` and `DXMT_SRC` override either with a local checkout, a ref of its remote, or `<git URL>#<ref>` (Wine and the DXMT overlay; the first run also builds LLVM 15 for DXMT, about an hour). `neutron compat <appid>` shows a game's entry in `data/compat.json`, generated from [highball-db](https://github.com/gauthierpiarrette/highball-db) by `scripts/update-compat-db.sh`; blocked titles need `install --force`.

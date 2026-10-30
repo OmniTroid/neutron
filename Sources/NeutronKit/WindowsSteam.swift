@@ -1,38 +1,34 @@
 import Foundation
 
-/// Valve's Windows Steam client in its own prefix, for games that need it (VAC). Neutron runs the unmodified client
-/// with its window shown and talks to it only through Valve's entry points: `steam.exe` command-line options and
+/// Valve's Windows Steam client in its own prefix, which installs, updates and launches every game. Neutron runs
+/// the unmodified client with its window shown and talks to it only through Valve's entry points: `steam.exe` command-line options and
 /// `steam://` URLs, which a second `steam.exe` forwards to the running client. State comes from the registry
 /// values the client writes.
 public struct WindowsSteam: Sendable {
     public let prefix: URL
     public let wine: URL
     static let installerURL = URL(string: "https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe")!
-    // Steam's own option for Chromium's software path, the one that runs under Wine
-    static let launchFlags = ["-cef-disable-gpu", "-cef-disable-gpu-compositing"]
 
-    public init(prefix: URL = Paths.prefixes.appending(path: "steam"), wine: URL? = nil) throws {
+    public init(prefix: URL = Paths.steamPrefix, runtime: URL? = nil) throws {
         self.prefix = prefix
-        if let wine {
-            self.wine = wine
-        } else if let override = ProcessInfo.processInfo.environment["NEUTRON_STEAM_WINE"] {
-            self.wine = URL(filePath: override)
-        } else {
-            self.wine = Paths.neutron.appending(path: "downloads/wine-staging-11.18/Wine Staging.app/Contents/Resources/wine/bin/wine")
-        }
-        guard FileManager.default.fileExists(atPath: self.wine.path) else {
-            throw NeutronError("Windows Steam runtime missing at \(self.wine.path); set NEUTRON_STEAM_WINE")
-        }
+        wine = try (runtime ?? Runtime.url(dist: Paths.dist())).appending(path: "bin/wine")
     }
 
     var steamExe: URL { prefix.appending(path: "drive_c/Program Files (x86)/Steam/steam.exe") }
-    var environment: [String: String] {
+    /// Wine's output for the client and every game it starts.
+    public var log: URL { prefix.appending(path: "neutron.log") }
+    public var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = prefix.path
-        env["WINEDEBUG"] = "-all"
+        // loaddll shows which renderer each process loads; see GraphicsCheck
+        env["WINEDEBUG"] = "-all,+pid,+loaddll"
+        // DXMT, never a copy a game ships (e.g. DXVK)
+        env["WINEDLLOVERRIDES"] = "d3d9,d3d10core,d3d11,dxgi=b;winemenubuilder.exe=d;winedbg.exe=d"
         // Steam's UI hangs under Wine's msync/esync
         env["WINEMSYNC"] = "0"
         env["WINEESYNC"] = "0"
+        // Steam's browser renders in a GPU process into a window its UI process owns
+        env["DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN"] = "1"
         return env
     }
 
@@ -50,21 +46,9 @@ public struct WindowsSteam: Sendable {
                 throw NeutronError("Windows Steam installer failed")
             }
         }
-        try removeHeadlessSetup()
     }
 
-    /// Undoes what the earlier headless proof of concept left in a prefix: Wine's null display driver,
-    /// Steam's remote-debugging marker and Neutron's DevTools port file.
-    func removeHeadlessSetup() throws {
-        let fm = FileManager.default
-        try? fm.removeItem(at: steamExe.deletingLastPathComponent().appending(path: ".cef-enable-remote-debugging"))
-        try? fm.removeItem(at: prefix.appending(path: "neutron-devtools-port"))
-        let userReg = (try? String(contentsOf: prefix.appending(path: "user.reg"), encoding: .utf8)) ?? ""
-        if userReg.contains(#""Graphics"="null""#) {
-            _ = try run(wine, ["reg", "delete", #"HKCU\Software\Wine\Drivers"#, "/v", "Graphics", "/f"], env: environment)
-            _ = try run(wine.deletingLastPathComponent().appending(path: "wineserver"), ["-w"], env: environment)
-        }
-    }
+    public var installed: Bool { FileManager.default.fileExists(atPath: steamExe.path) }
 
     /// Starts the client, or shows the running one's window. `silent` keeps a new client in the tray, as for game
     /// launches. The first start downloads ~600 MB of updates; Steam restarts itself during it and under Wine
@@ -85,7 +69,7 @@ public struct WindowsSteam: Sendable {
             if process == nil || (settled && !steamProcessExists()) {
                 guard launches < 5 else { throw NeutronError("Windows Steam keeps exiting during startup") }
                 launches += 1
-                process = try launch(WindowsSteam.launchFlags + (silent ? ["-silent"] : []))
+                process = try launch(silent ? ["-silent"] : [])
                 exitedAt = nil
             } else if steamProcessExists(), userInterfaceIsUp() {
                 return
@@ -105,29 +89,54 @@ public struct WindowsSteam: Sendable {
 
     /// Opens Steam's own install dialog for the game; the user confirms it there.
     public func install(appID: UInt32) throws {
-        try forward(["steam://install/\(appID)"])
+        try open("steam://install/\(appID)")
+    }
+
+    /// Opens Steam's own uninstall confirmation.
+    public func uninstall(appID: UInt32) throws {
+        try open("steam://uninstall/\(appID)")
     }
 
     public func launch(appID: UInt32) throws {
         try forward(["-applaunch", String(appID)])
     }
 
+    /// Hands a steam:// URL to the client, e.g. `steam://nav/games/details/<appid>`.
+    public func open(_ url: String) throws {
+        try forward([url])
+    }
+
     // MARK: State, from the registry the client writes
 
-    public struct Status: Sendable {
+    public struct Status: Sendable, Equatable {
         public var running: Bool
         public var signedIn: Bool
         public var account: String?
         public var runningAppID: UInt32?
+        /// Processes that rendered with something other than DXMT since Steam started.
+        public var fallbacks: [GraphicsCheck.Fallback]
+
+        public init(running: Bool, signedIn: Bool, account: String? = nil, runningAppID: UInt32? = nil,
+                    fallbacks: [GraphicsCheck.Fallback] = []) {
+            self.running = running
+            self.signedIn = signedIn
+            self.account = account
+            self.runningAppID = runningAppID
+            self.fallbacks = fallbacks
+        }
+    }
+
+    public func fallbacks() -> [GraphicsCheck.Fallback] {
+        GraphicsCheck.fallbacks(inLog: (try? String(contentsOf: log, encoding: .utf8)) ?? "")
     }
 
     public func status() throws -> Status {
-        guard steamProcessExists() else { return Status(running: false, signedIn: false) }
+        guard steamProcessExists() else { return Status(running: false, signedIn: false, fallbacks: fallbacks()) }
         let activeUser = try registryValue(#"HKCU\Software\Valve\Steam\ActiveProcess"#, "ActiveUser").flatMap(WindowsSteam.dword)
         let runningApp = try registryValue(#"HKCU\Software\Valve\Steam"#, "RunningAppID").flatMap(WindowsSteam.dword)
         return Status(running: true, signedIn: (activeUser ?? 0) != 0,
                       account: try registryValue(#"HKCU\Software\Valve\Steam"#, "AutoLoginUser"),
-                      runningAppID: runningApp.flatMap { $0 == 0 ? nil : $0 })
+                      runningAppID: runningApp.flatMap { $0 == 0 ? nil : $0 }, fallbacks: fallbacks())
     }
 
     // MARK: Plumbing
@@ -140,12 +149,14 @@ public struct WindowsSteam: Sendable {
     }
 
     func launch(_ arguments: [String]) throws -> Process {
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let output = try FileHandle(forWritingTo: log)
         let process = Process()
         process.executableURL = wine
         process.arguments = [steamExe.path] + arguments
         process.environment = environment
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = output
         try process.run()
         return process
     }

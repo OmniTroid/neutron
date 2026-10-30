@@ -4,10 +4,9 @@ import SwiftUI
 struct GameDetailView: View {
     @Environment(AppModel.self) private var model
     let game: SteamGame
-    @State private var sizeOnDisk: Int64?
-    @State private var confirmingUninstall = false
 
-    private var installed: Bool { model.installed.contains(game.appID) }
+    private var state: AppState? { model.states[game.appID] }
+    private var installed: Bool { state?.installed == true }
 
     var body: some View {
         ScrollView {
@@ -15,7 +14,10 @@ struct GameDetailView: View {
                 hero
                 actionBar
                 VStack(spacing: 16) {
-                    if !model.steamIsRunning {
+                    if !model.status.fallbacks.isEmpty {
+                        fallbackBanner
+                    }
+                    if !model.status.signedIn {
                         steamBanner
                     }
                     HStack(alignment: .top, spacing: 16) {
@@ -42,17 +44,6 @@ struct GameDetailView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
-        .task(id: "\(game.appID)-\(installed)") {
-            sizeOnDisk = nil
-            guard installed else { return }
-            let appID = game.appID
-            sizeOnDisk = await Task.detached(priority: .utility) { SteamLibrary.sizeOnDisk(appID) }.value
-        }
-        .confirmationDialog("Uninstall \(game.name)?", isPresented: $confirmingUninstall) {
-            Button("Uninstall", role: .destructive) { model.uninstall(game) }
-        } message: {
-            Text("This deletes the downloaded Windows build. Your Wine prefix and saves are kept.")
-        }
     }
 
     // MARK: Hero
@@ -95,30 +86,26 @@ struct GameDetailView: View {
         HStack(spacing: 28) {
             primaryAction
 
-            if installed {
-                stat("Size on disk", sizeOnDisk.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "—")
+            if let state, state.sizeOnDisk > 0 {
+                stat("Size on disk", ByteCountFormatter.string(fromByteCount: state.sizeOnDisk, countStyle: .file))
             } else if let size = game.installSize {
                 stat("Download size", ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
             }
-            stat("Graphics", model.backend(for: game) == .dxmt ? "DXMT · Metal" : "wined3d · OpenGL")
-            if game.hasMacVersion {
-                stat("Platform", "Also on macOS")
-            }
+            stat("Graphics", "DXMT · Metal")
 
             Spacer()
 
             HStack(spacing: 8) {
-                Button { model.openInSteam(game) } label: { Image(systemName: "arrow.up.forward.app") }
+                Button { model.showInSteam(game) } label: { Image(systemName: "arrow.up.forward.app") }
                     .help("Show in Steam")
                 Button { model.openStorePage(game) } label: { Image(systemName: "bag") }
                     .help("Store page")
                 Menu {
-                    if installed {
+                    if state != nil {
                         Button("Show in Finder", systemImage: "folder") { model.revealInstall(game) }
-                        Button("Open Log", systemImage: "doc.text") { model.openLog(game) }
                         Divider()
-                        Button("Verify Files", systemImage: "checkmark.shield") { model.install(game) }
-                        Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmingUninstall = true }
+                        Button("Verify Files", systemImage: "checkmark.shield") { model.verify(game) }
+                        Button("Uninstall…", systemImage: "trash", role: .destructive) { model.uninstall(game) }
                     } else {
                         Button("Install", systemImage: "arrow.down.circle") { model.install(game) }
                     }
@@ -141,11 +128,12 @@ struct GameDetailView: View {
 
     @ViewBuilder
     private var primaryAction: some View {
-        if let download = model.downloads[game.appID] {
-            DownloadProgress(download: download) { model.cancelDownload(game) }
-        } else if model.running[game.appID] != nil {
-            Button { model.stop(game) } label: { Label("Stop", systemImage: "stop.fill") }
+        if let state, state.updating || state.paused || !state.installed {
+            DownloadProgress(state: state) { model.showDownloads() }
+        } else if model.isRunning(game) {
+            Button {} label: { Label("Running", systemImage: "gamecontroller.fill") }
                 .buttonStyle(ActionButtonStyle(colors: Theme.stop))
+                .disabled(true)
         } else if model.launching.contains(game.appID) {
             Button {} label: {
                 HStack(spacing: 10) {
@@ -180,19 +168,40 @@ struct GameDetailView: View {
 
     // MARK: Cards
 
+    private var fallbackBanner: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Not rendering with DXMT").font(.system(size: 13, weight: .semibold))
+                ForEach(model.status.fallbacks, id: \.self) { fallback in
+                    Text(fallback.description)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.red.opacity(0.4)))
+    }
+
     private var steamBanner: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Steam isn't running").font(.system(size: 13, weight: .semibold))
-                Text("Games use the Mac Steam client for sign-in, achievements and friends.")
+                Text(model.status.running ? "Sign in to Steam" : "Steam isn't running").font(.system(size: 13, weight: .semibold))
+                Text("Steam installs, updates and launches your games. Sign in and confirm prompts in its window.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.secondaryText)
             }
             Spacer()
-            Button("Open Steam") { model.launchSteam() }
+            Button(model.status.running ? "Show Steam" : "Start Steam") { model.showSteam() }
                 .controlSize(.large)
+                .disabled(model.startingSteam)
         }
         .padding(14)
         .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -206,17 +215,7 @@ struct GameDetailView: View {
                     compatReport(entry)
                     Divider()
                 }
-                Picker("Graphics backend", selection: Binding(
-                    get: { model.backend(for: game) },
-                    set: { model.setBackend($0, for: game) }
-                )) {
-                    Text("DXMT (Direct3D 10/11 on Metal)").tag(Backend.dxmt)
-                    Text("wined3d (OpenGL)").tag(Backend.wined3d)
-                }
-                .pickerStyle(.radioGroup)
-                .disabled(model.running[game.appID] != nil)
-
-                Text("Direct3D 9 games use wined3d with either option.")
+                Text("Direct3D 10 and 11 render through DXMT on Metal; other graphics APIs use Wine's own.")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -234,14 +233,14 @@ struct GameDetailView: View {
                     badge(anticheat.joined(separator: ", "), color: entry.blocked ? .red : .orange)
                 }
                 if let renderer = entry.renderer {
-                    badge("Recommended: \(renderer)", color: .blue)
+                    badge("Tested with \(renderer)", color: .blue)
                 }
             }
             if let summary = entry.summary {
                 Text(summary).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
             }
             if entry.usesVAC {
-                Text("VAC isn't active through Neutron; Valve's servers may treat the game as insecure.")
+                Text("Uses VAC. Whether VAC accepts Wine on macOS hasn't been verified.")
                     .font(.system(size: 11)).foregroundStyle(.orange)
             }
             if let args = entry.launchArgs {
@@ -266,8 +265,10 @@ struct GameDetailView: View {
         Card(title: "Details") {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 detailRow("App ID", String(game.appID))
-                detailRow("Status", installed ? "Installed" : "Not installed")
-                detailRow("Prefix", "~/Library/Application Support/Neutron/prefixes/\(game.appID)")
+                detailRow("Status", installed ? "Installed" : state != nil ? "Downloading" : "Not installed")
+                if let dir = state?.directory {
+                    detailRow("Folder", dir.path.replacingOccurrences(of: Paths.home.path, with: "~"))
+                }
             }
             .font(.system(size: 12))
         }
@@ -286,31 +287,37 @@ struct GameDetailView: View {
 }
 
 struct DownloadProgress: View {
-    let download: Download
-    let cancel: () -> Void
+    let state: AppState
+    let showDownloads: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(download.progress.map { "Downloading · \(Int($0 * 100))%" } ?? "Preparing")
-                        .font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                }
-                ProgressView(value: download.progress ?? 0)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                ProgressView(value: state.progress ?? 0)
                     .progressViewStyle(.linear)
                     .tint(Theme.accent)
-                Text(download.status)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if state.bytesToDownload > 0 {
+                    Text("\(bytes(state.bytesDownloaded)) of \(bytes(state.bytesToDownload))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondaryText)
+                }
             }
             .frame(width: 260)
 
-            Button(action: cancel) { Image(systemName: "xmark") }
+            Button(action: showDownloads) { Image(systemName: "arrow.down.circle") }
                 .buttonStyle(IconButtonStyle())
-                .help("Cancel download")
+                .help("Show Steam's downloads")
         }
+    }
+
+    private var title: String {
+        let percent = state.progress.map { " · \(Int($0 * 100))%" } ?? ""
+        return state.paused ? "Paused\(percent)" : state.updating ? "Downloading\(percent)" : "Queued in Steam"
+    }
+
+    private func bytes(_ count: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
     }
 }

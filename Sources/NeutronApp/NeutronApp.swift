@@ -45,8 +45,16 @@ struct ContentView: View {
                 GameDetailView(game: game)
                     .id(game.appID)
             } else {
-                ContentUnavailableView("Select a Game", systemImage: "gamecontroller",
-                                       description: Text("Your Windows games from Steam appear in the sidebar."))
+                ContentUnavailableView {
+                    Label(model.games.isEmpty ? "Sign in to Steam" : "Select a Game", systemImage: "gamecontroller")
+                } description: {
+                    Text(model.games.isEmpty ? "Your library appears here once Steam has signed in." : "Your Windows games appear in the sidebar.")
+                } actions: {
+                    if !model.status.signedIn {
+                        Button(model.status.running ? "Show Steam" : "Start Steam") { model.showSteam() }
+                            .disabled(model.startingSteam)
+                    }
+                }
                     .background(Theme.background)
             }
         }
@@ -54,20 +62,21 @@ struct ContentView: View {
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button { model.showSteam() } label: { Image(systemName: "macwindow") }
+                    .help(model.status.running ? "Show Steam" : "Start Steam")
+                    .disabled(model.startingSteam)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { Task { await model.load() } } label: { Image(systemName: "arrow.clockwise") }
                     .help("Refresh library")
             }
         }
+        .task { await model.monitor() }
         .task {
             await model.load()
             #if DEBUG
             await debugSnapshot()
             #endif
-        }
-        .sheet(item: $model.prompt) { LoginSheet(prompt: $0) }
-        .sheet(isPresented: Binding(get: { model.accountRequestFor != nil },
-                                    set: { if !$0 { model.accountRequestFor = nil } })) {
-            AccountSheet()
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.errorMessage != nil },
                                                              set: { if !$0 { model.errorMessage = nil } })) {

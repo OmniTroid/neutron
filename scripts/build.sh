@@ -1,13 +1,42 @@
 #!/bin/bash
-# Builds dist/: Wine runtimes (one per graphics backend) with the Steam bridge installed.
+# Builds dist/: Wine (external/wine) as dist/wine and DXMT (external/dxmt) as dist/overlays/dxmt.
+# WINE_SRC / DXMT_SRC override a submodule with a local checkout, a ref of its remote, or <git URL>#<ref>.
+# Needs Homebrew bison, meson, ninja, cmake, mingw-w64, freetype, gnutls and sdl2 (headers), and Xcode's Metal toolchain.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/versions.env"
 B="$ROOT/build"
+
+# Source tree for submodule $1: the pinned commit, or override $2 checked out as a worktree under build/src
+source_tree() {
+    local name=$1 spec=$2 sub="$ROOT/external/$1" tree="$B/src/$1"
+    if [ -d "$spec" ]; then (cd "$spec" && pwd); return; fi
+    git -C "$ROOT" submodule update -q --init --recursive "external/$name" >&2 || return 1
+    if [ -z "$spec" ]; then echo "$sub"; return; fi
+    local remote=origin ref=$spec commit
+    case $spec in *#*) remote=${spec%#*} ref=${spec##*#} ;; esac
+    git -C "$sub" fetch -q "$remote" "$ref" >&2 || return 1
+    commit=$(git -C "$sub" rev-parse FETCH_HEAD) || return 1
+    # an existing worktree is moved in place, so unchanged files keep their timestamps
+    if [ -e "$tree/.git" ]; then
+        git -C "$tree" checkout -q --detach "$commit" >&2 || return 1
+    else
+        rm -rf "$tree" && git -C "$sub" worktree prune && mkdir -p "$B/src" || return 1
+        git -C "$sub" worktree add -q --detach "$tree" "$commit" >&2 || return 1
+    fi
+    git -C "$tree" submodule update -q --init --recursive >&2 || return 1
+    echo "$tree"
+}
+WINE_SRC=$(source_tree wine "${WINE_SRC:-}")
+DXMT_SRC=$(source_tree dxmt "${DXMT_SRC:-}")
+echo "wine: $WINE_SRC ($(git -C "$WINE_SRC" rev-parse --short HEAD))"
+echo "dxmt: $DXMT_SRC ($(git -C "$DXMT_SRC" rev-parse --short HEAD))"
 DIST="$ROOT/dist"
 JOBS=$(sysctl -n hw.ncpu)
-export PATH="$(brew --prefix bison)/bin:$PATH"
+BREW=$(brew --prefix)
+export PATH="$BREW/opt/bison/bin:$PATH"
+export MACOSX_DEPLOYMENT_TARGET=14.0
 
 fetch() {
     local url=$1 sha=$2 out=$3
@@ -16,76 +45,96 @@ fetch() {
     echo "$sha  $out" | shasum -a 256 -c - >/dev/null
 }
 
-fetch "$WINE_BIN_URL" "$WINE_BIN_SHA256" "$B/dl/wine-bin/$(basename "$WINE_BIN_URL")"
-fetch "$WINE_SRC_URL" "$WINE_SRC_SHA256" "$B/dl/wine-src/$(basename "$WINE_SRC_URL")"
-fetch "$DXMT_URL" "$DXMT_SHA256" "$B/dl/dxmt/$(basename "$DXMT_URL")"
+xcrun -sdk macosx -f metal >/dev/null || { echo "install Xcode's Metal toolchain: xcodebuild -downloadComponent MetalToolchain"; exit 1; }
 
-if [ ! -d "$B/proton" ]; then
-    git clone -q --filter=blob:none --no-checkout "$PROTON_REPO" "$B/proton"
-    git -C "$B/proton" sparse-checkout set --no-cone '/lsteamclient/*' '!/lsteamclient/steamworks_sdk_*' '/steam_helper/'
+fetch "$HOSTLIBS_URL" "$HOSTLIBS_SHA256" "$B/dl/$(basename "$HOSTLIBS_URL")"
+fetch "$WINE_MONO_URL" "$WINE_MONO_SHA256" "$B/dl/addons/$(basename "$WINE_MONO_URL")"
+fetch "$WINE_GECKO32_URL" "$WINE_GECKO32_SHA256" "$B/dl/addons/$(basename "$WINE_GECKO32_URL")"
+fetch "$WINE_GECKO64_URL" "$WINE_GECKO64_SHA256" "$B/dl/addons/$(basename "$WINE_GECKO64_URL")"
+
+# Host libraries; the build's copies get absolute install names so tools run during the build find them
+HOSTLIBS="$B/hostlibs"
+if [ ! -f "$HOSTLIBS/.done" ]; then
+    rm -rf "$HOSTLIBS" "$B/unpack" && mkdir -p "$HOSTLIBS" "$B/unpack"
+    tar -xJf "$B/dl/$(basename "$HOSTLIBS_URL")" -C "$B/unpack"
+    ditto "$B/unpack/"*.app/Contents/Resources/wine/lib "$HOSTLIBS/lib"
+    rm -rf "$HOSTLIBS/lib/wine" "$B/unpack"
+    rm -rf "$HOSTLIBS/build" && ditto "$HOSTLIBS/lib" "$HOSTLIBS/build"
+    for lib in freetype gnutls SDL2; do
+        real=$(readlink -f "$HOSTLIBS/build/lib$lib.dylib")
+        install_name_tool -id "$real" "$real" 2>/dev/null
+        codesign -f -s - "$real" 2>/dev/null
+    done
+    touch "$HOSTLIBS/.done"
 fi
-git -C "$B/proton" cat-file -e "$PROTON_COMMIT^{commit}" 2>/dev/null || git -C "$B/proton" fetch -q origin "$PROTON_COMMIT"
-git -C "$B/proton" checkout -q "$PROTON_COMMIT"
 
-# Wine source tree with our modules added
-SRC="$B/src/wine-$WINE_VERSION"
-rm -rf "$SRC"
-mkdir -p "$B/src"
-tar -xJf "$B/dl/wine-src/$(basename "$WINE_SRC_URL")" -C "$B/src"
-cp -R "$B/proton/lsteamclient" "$SRC/dlls/lsteamclient"
-patch -s -d "$SRC/dlls" -p1 < "$ROOT/patches/lsteamclient-macos.patch"
-patch -s -d "$SRC/dlls" -p1 < "$ROOT/patches/winemac-dxmt.patch"
-mkdir -p "$SRC/programs/steam" "$SRC/dlls/steamclient"
-cp "$B/proton/steam_helper/"* "$SRC/programs/steam/"
-cp "$ROOT/dlls/steamclient/Makefile.in" "$SRC/dlls/steamclient/"
-grep -v '^#\|^$\|-private' "$SRC/dlls/lsteamclient/lsteamclient.spec" | sed -E \
-    -e 's/^([^ ]+) stub ([A-Za-z0-9_]+)$/\1 stdcall \2() lsteamclient.\2/' \
-    -e 's/^([^ ]+) cdecl ([A-Za-z0-9_]+)(\(.*\))$/\1 cdecl \2\3 lsteamclient.\2/' \
-    > "$SRC/dlls/steamclient/steamclient.spec"
-sed -i '' \
-    -e '/^wine_fn_config_makefile dlls\/lz32 enable_lz32$/a\
-wine_fn_config_makefile dlls/lsteamclient enable_lsteamclient
-' \
-    -e '/^wine_fn_config_makefile dlls\/sti enable_sti$/a\
-wine_fn_config_makefile dlls/steamclient enable_steamclient
-' \
-    -e '/^wine_fn_config_makefile programs\/start enable_start$/a\
-wine_fn_config_makefile programs/steam enable_steam
-' \
-    "$SRC/configure"
-
+# Wine
 OBJ="$B/wine-obj"
-rm -rf "$OBJ"
-mkdir -p "$OBJ"
-(cd "$OBJ" && "$SRC/configure" -q CC="clang -arch x86_64" CXX="clang++ -arch x86_64" \
-    --host=x86_64-apple-darwin --enable-archs=i386,x86_64 \
-    --without-x --without-freetype --without-gstreamer --without-gnutls --without-sdl \
-    --without-cups --without-sane --without-gphoto --without-pcap --without-usb --without-v4l2 \
-    --without-krb5 --without-netapi --without-opencl --without-vulkan --without-inotify \
-    --without-capi --without-ffmpeg > configure.log)
-make -C "$OBJ" -j"$JOBS" -s dlls/lsteamclient/all dlls/steamclient/all programs/steam/all dlls/winemac.drv/all
+WINE_INSTALL="$B/wine-install"
+if [ ! -f "$OBJ/Makefile" ] || [ "$WINE_SRC/wine/configure" -nt "$OBJ/Makefile" ] \
+    || ! grep -q "^srcdir = $WINE_SRC/wine\$" "$OBJ/Makefile"; then
+    rm -rf "$OBJ" && mkdir -p "$OBJ"
+    (cd "$OBJ" && "$WINE_SRC/wine/configure" -q CC="clang -arch x86_64" CXX="clang++ -arch x86_64" \
+        --host=x86_64-apple-darwin --enable-archs=i386,x86_64 --with-mingw --prefix="$WINE_INSTALL" \
+        --without-x --without-alsa --without-capi --with-coreaudio --without-cups --without-dbus --without-fontconfig \
+        --without-gphoto --without-gstreamer --without-krb5 --without-netapi --without-oss --without-pulse --without-sane \
+        --without-udev --without-usb --without-v4l2 --without-pcap --without-opencl --without-inotify --without-ffmpeg \
+        --with-freetype --with-gnutls --with-sdl --with-vulkan \
+        ac_cv_lib_soname_SDL2=libSDL2-2.0.0.dylib ac_cv_lib_soname_freetype=libfreetype.6.dylib \
+        ac_cv_lib_soname_gnutls=libgnutls.30.dylib ac_cv_lib_soname_vulkan=libvulkan.1.dylib \
+        FREETYPE_CFLAGS="-I$BREW/include/freetype2" FREETYPE_LIBS="-L$HOSTLIBS/build -lfreetype" \
+        GNUTLS_CFLAGS="-I$BREW/include" GNUTLS_LIBS="-L$HOSTLIBS/build -lgnutls" \
+        SDL2_CFLAGS="-I$BREW/include/SDL2" SDL2_LIBS="-L$HOSTLIBS/build -lSDL2" > configure.log)
+fi
+make -C "$OBJ" -j"$JOBS" -s
+rm -rf "$WINE_INSTALL"
+make -C "$OBJ" -s install-lib >/dev/null
 
-# dist/wine is the base runtime (wined3d); overlays/<backend> holds files that replace or add to it
-rm -rf "$DIST"
-mkdir -p "$DIST/steam" "$B/unpack"
-rm -rf "$B/unpack/wine"
-tar -xJf "$B/dl/wine-bin/$(basename "$WINE_BIN_URL")" -C "$B/unpack"
-BASE="$DIST/wine"
-mv "$B/unpack/"*.app/Contents/Resources/wine "$BASE"
-rm -rf "$B/unpack/"*.app
-for arch in i386 x86_64; do
-    cp "$OBJ/dlls/lsteamclient/$arch-windows/lsteamclient.dll" "$OBJ/programs/steam/$arch-windows/steam.exe" "$BASE/lib/wine/$arch-windows/"
+# LLVM 15 for DXMT's shader compiler, built once
+LLVM="$B/llvm"
+if [ ! -f "$LLVM/lib/libLLVMCore.a" ]; then
+    [ -d "$B/llvm-project" ] || git clone -q --depth 1 --branch "$DXMT_LLVM_VERSION" https://github.com/llvm/llvm-project.git "$B/llvm-project"
+    cmake -B "$B/llvm-build" -S "$B/llvm-project/llvm" -G Ninja -DCMAKE_INSTALL_PREFIX="$LLVM" \
+        -DCMAKE_OSX_ARCHITECTURES=x86_64 -DLLVM_HOST_TRIPLE=x86_64-apple-darwin -DLLVM_ENABLE_ASSERTIONS=On \
+        -DLLVM_ENABLE_ZSTD=Off -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-D_LIBCPP_KEEP_TRANSITIVE_INCLUDES_LLVM23" \
+        -DLLVM_TARGETS_TO_BUILD="" -DLLVM_BUILD_TOOLS=Off -DLLVM_INCLUDE_BENCHMARKS=Off \
+        -DLLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO=Off >/dev/null
+    cmake --build "$B/llvm-build"
+    cmake --install "$B/llvm-build" >/dev/null
+fi
+
+# DXMT against this Wine build, 64- and 32-bit
+DX="$DXMT_SRC"
+DXMT_OPTIONS=()
+grep -q "'enable_d3d9'" "$DX/meson.options" 2>/dev/null && DXMT_OPTIONS+=(-Denable_d3d9=true)
+rm -rf "$B/dxmt-install"
+for arch in 64 32; do
+    rm -rf "$B/dxmt-build$arch"
+    meson setup --cross-file "$DX/build-win$arch.txt" -Dnative_llvm_path="$LLVM" -Dwine_build_path="$OBJ" ${DXMT_OPTIONS[@]+"${DXMT_OPTIONS[@]}"} \
+        --buildtype release --prefix "$B/dxmt-install" "$B/dxmt-build$arch" "$DX" >/dev/null
+    meson compile -C "$B/dxmt-build$arch" >/dev/null
+    meson install -C "$B/dxmt-build$arch" >/dev/null
 done
-cp "$OBJ/dlls/lsteamclient/lsteamclient.so" "$BASE/lib/wine/x86_64-unix/"
-cp "$OBJ/dlls/steamclient/i386-windows/steamclient.dll" "$DIST/steam/steamclient.dll"
-cp "$OBJ/dlls/steamclient/x86_64-windows/steamclient.dll" "$DIST/steam/steamclient64.dll"
+
+# dist/wine: Wine plus host libraries and add-ons; dist/overlays/dxmt replaces and adds to it
+rm -rf "$DIST"
+mkdir -p "$DIST"
+ditto "$WINE_INSTALL" "$DIST/wine"
+rm -rf "$DIST/wine/include" "$DIST/wine/share/man" "$DIST/wine/share/applications"
+ditto "$HOSTLIBS/lib" "$DIST/wine/lib"
+mkdir -p "$DIST/wine/share/wine/mono" "$DIST/wine/share/wine/gecko"
+tar -xJf "$B/dl/addons/$(basename "$WINE_MONO_URL")" -C "$DIST/wine/share/wine/mono"
+tar -xJf "$B/dl/addons/$(basename "$WINE_GECKO32_URL")" -C "$DIST/wine/share/wine/gecko"
+tar -xJf "$B/dl/addons/$(basename "$WINE_GECKO64_URL")" -C "$DIST/wine/share/wine/gecko"
+find "$DIST/wine/lib/wine" -name '*.so' -exec strip -x {} + 2>/dev/null
+find "$DIST/wine/lib/wine" \( -name '*.dll' -o -name '*.exe' -o -name '*.drv' -o -name '*.sys' \) -print0 \
+    | xargs -0 -n 200 x86_64-w64-mingw32-strip --strip-debug 2>/dev/null || true
 
 DXMT="$DIST/overlays/dxmt/lib/wine"
-tar -xzf "$B/dl/dxmt/$(basename "$DXMT_URL")" -C "$B/unpack"
-for d in i386-windows x86_64-windows x86_64-unix; do
-    mkdir -p "$DXMT/$d"
-    cp "$B/unpack/$DXMT_VERSION/$d/"* "$DXMT/$d/"
-done
-cp "$OBJ/dlls/winemac.drv/winemac.so" "$DXMT/x86_64-unix/"
+mkdir -p "$DXMT"
+cp -R "$B/dxmt-install/"*-windows "$B/dxmt-install/x86_64-unix" "$DXMT/"
+rm -f "$DXMT"/*/*.dll.a
+strip -x "$DXMT/x86_64-unix/winemetal.so"
+x86_64-w64-mingw32-strip --strip-debug "$DXMT"/*-windows/*.dll
 
 echo "built $DIST"

@@ -1,10 +1,9 @@
 import Foundation
 
-/// An owned game with a Windows launch option, as known to the Mac Steam client.
+/// An owned game with a Windows launch option, as known to the Windows Steam client.
 public struct SteamGame: Identifiable, Hashable, Sendable {
     public let appID: UInt32
     public let name: String
-    public let hasMacVersion: Bool
     public let installSize: Int64?
     let iconHash: String?
 
@@ -49,24 +48,9 @@ public enum SteamLibrary {
             else { return nil }
             let is64Bit = launch["config"]?["osarch"]?.text != "32"
             return SteamGame(appID: appID, name: name,
-                             hasMacVersion: common?["oslist"]?.text?.contains("macos") ?? false,
                              installSize: AppInfo.windowsInstallSize(info, is64Bit: is64Bit),
                              iconHash: common?["icon"]?.text ?? common?["clienticon"]?.text)
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    public static func isInstalled(_ appID: UInt32, library: URL = Paths.library) -> Bool {
-        (try? Library.game(appID: appID, library: library)) != nil
-    }
-
-    public static func sizeOnDisk(_ appID: UInt32, library: URL = Paths.library) -> Int64 {
-        let dir = Library.directory(appID: appID, library: library)
-        guard let files = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]) else { return 0 }
-        var total: Int64 = 0
-        for case let url as URL in files {
-            total += Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
-        }
-        return total
     }
 }

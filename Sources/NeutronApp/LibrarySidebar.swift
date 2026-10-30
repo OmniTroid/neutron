@@ -48,7 +48,8 @@ struct GameRow: View {
     let game: SteamGame
 
     var body: some View {
-        let installed = model.installed.contains(game.appID)
+        let state = model.states[game.appID]
+        let installed = state?.installed == true
         HStack(spacing: 10) {
             SteamImage(url: Artwork.icon.url(for: game)) {
                 RoundedRectangle(cornerRadius: 5).fill(Theme.raised)
@@ -65,12 +66,12 @@ struct GameRow: View {
 
             Spacer(minLength: 4)
 
-            if let download = model.downloads[game.appID] {
-                ProgressView(value: download.progress ?? 0)
+            if let state, state.updating {
+                ProgressView(value: state.progress ?? 0)
                     .progressViewStyle(.circular)
                     .controlSize(.mini)
                     .tint(Theme.accent)
-            } else if model.running[game.appID] != nil {
+            } else if model.isRunning(game) {
                 Text("Running")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.play[0])

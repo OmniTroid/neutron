@@ -2,215 +2,146 @@ import AppKit
 import NeutronKit
 import Observation
 
-@MainActor @Observable
-final class Download {
-    var progress: Double?
-    var status = "Starting…"
-    var session: InstallSession?
-}
-
 enum LibraryFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case installed = "Installed"
-    case windowsOnly = "Windows only"
 
     var id: Self { self }
-}
-
-struct PendingPrompt: Identifiable {
-    let appID: UInt32
-    let prompt: InstallPrompt
-    var id: String { "\(appID)-\(prompt)" }
 }
 
 @MainActor @Observable
 final class AppModel {
     var games: [SteamGame] = []
-    var installed: Set<UInt32> = []
-    var downloads: [UInt32: Download] = [:]
-    var running: [UInt32: GameSession] = [:]
+    var states: [UInt32: AppState] = [:]
+    var status = WindowsSteam.Status(running: false, signedIn: false)
+    var startingSteam = false
     var launching: Set<UInt32> = []
     var selection: UInt32?
     var search = ""
     var filter: LibraryFilter = .all
-    var config = Config.load()
-    var prompt: PendingPrompt?
-    var accountRequestFor: UInt32?
     var errorMessage: String?
     var loading = true
+    private var steam: WindowsSteam?
 
     var selectedGame: SteamGame? { games.first { $0.appID == selection } }
 
     var visibleGames: [SteamGame] {
-        games.filter { game in
-            switch filter {
-            case .all: true
-            case .installed: installed.contains(game.appID) || downloads[game.appID] != nil
-            case .windowsOnly: !game.hasMacVersion
-            }
-        }
-        .filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+        games.filter { filter == .all || states[$0.appID] != nil }
+            .filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
     }
 
-    var steamIsRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: "com.valvesoftware.steam").isEmpty
-    }
+    func isRunning(_ game: SteamGame) -> Bool { status.runningAppID == game.appID }
 
     func load() async {
         loading = true
         defer { loading = false }
-        do {
-            let (games, installed) = try await Task.detached(priority: .userInitiated) {
-                let games = try SteamLibrary.games()
-                return (games, Set(games.map(\.appID).filter { SteamLibrary.isInstalled($0) }))
-            }.value
-            self.games = games
-            self.installed = installed
-            if selection == nil { selection = games.first { installed.contains($0.appID) }?.appID ?? games.first?.appID }
-        } catch {
-            errorMessage = "Couldn't read your Steam library: \(error)"
-        }
+        // empty until Steam has signed in once and cached the account's licenses
+        let games = await Task.detached(priority: .userInitiated) { (try? SteamLibrary.games()) ?? [] }.value
+        self.games = games
+        states = await Task.detached(priority: .userInitiated) { SteamApps.states() }.value
+        if selection == nil { selection = games.first { states[$0.appID]?.installed == true }?.appID ?? games.first?.appID }
     }
 
-    func backend(for game: SteamGame) -> Backend { config.backend(for: game.appID) }
-
-    func setBackend(_ backend: Backend, for game: SteamGame) {
-        config.backends = (config.backends ?? [:]).merging([String(game.appID): backend.rawValue]) { $1 }
-        try? config.save()
-    }
-
-    // MARK: Install
-
-    func install(_ game: SteamGame) {
-        guard let user = config.user else {
-            accountRequestFor = game.appID
-            return
-        }
-        guard let info = try? AppInfo.read(appID: game.appID),
-              let installedGame = InstalledGame(appID: game.appID, appInfo: info) else {
-            errorMessage = "Steam has no Windows launch option for \(game.name)."
-            return
-        }
-
-        let download = Download()
-        downloads[game.appID] = download
-        let appID = game.appID
-        Task {
-            do {
-                download.session = try await InstallSession(game: installedGame, user: user) { event in
-                    Task { @MainActor in self.handle(event, for: appID) }
+    /// Follows the client's own files and registry while the window is open.
+    func monitor() async {
+        var tick = 0
+        while !Task.isCancelled {
+            states = await Task.detached(priority: .utility) { SteamApps.states() }.value
+            if tick % 3 == 0, let steam = try? await client() {
+                let status = await Task.detached(priority: .utility) {
+                    (try? steam.status()) ?? WindowsSteam.Status(running: false, signedIn: false)
+                }.value
+                if status.signedIn && !self.status.signedIn { await load() }
+                let new = status.fallbacks.filter { !self.status.fallbacks.contains($0) }
+                if !new.isEmpty {
+                    errorMessage = "Not rendering with DXMT:\n" + new.map(\.description).joined(separator: "\n")
                 }
+                self.status = status
+            }
+            tick += 1
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+
+    private func client() async throws -> WindowsSteam {
+        if let steam { return steam }
+        // the first call assembles the runtime, which copies files
+        let steam = try await Task.detached(priority: .userInitiated) { try WindowsSteam() }.value
+        self.steam = steam
+        return steam
+    }
+
+    // MARK: Steam
+
+    func showSteam() {
+        startingSteam = true
+        Task {
+            defer { startingSteam = false }
+            do {
+                try await client().start()
             } catch {
-                downloads[appID] = nil
-                errorMessage = "\(error)"
+                errorMessage = "Couldn't start Steam: \(error)"
             }
         }
     }
 
-    func setAccount(_ user: String) {
-        config.user = user
-        try? config.save()
-        if let appID = accountRequestFor, let game = games.first(where: { $0.appID == appID }) {
-            accountRequestFor = nil
-            install(game)
+    /// Starts Steam in the tray if needed, then hands it a request.
+    private func request(_ what: String, _ action: @escaping @Sendable (WindowsSteam) throws -> Void) {
+        Task {
+            do {
+                let steam = try await client()
+                if !status.running { startingSteam = true }
+                defer { startingSteam = false }
+                try await steam.start(silent: true)
+                try await Task.detached { try action(steam) }.value
+            } catch {
+                errorMessage = "Couldn't \(what): \(error)"
+            }
         }
     }
 
-    func cancelDownload(_ game: SteamGame) {
-        downloads[game.appID]?.session?.cancel()
+    // MARK: Games
+
+    func install(_ game: SteamGame) {
+        let appID = game.appID
+        request("install \(game.name)") { try $0.install(appID: appID) }
     }
 
-    func answer(_ prompt: PendingPrompt, with text: String?) {
-        self.prompt = nil
-        guard let session = downloads[prompt.appID]?.session else { return }
-        if let text { session.respond(text) } else { session.cancel() }
+    func uninstall(_ game: SteamGame) {
+        let appID = game.appID
+        request("uninstall \(game.name)") { try $0.uninstall(appID: appID) }
     }
 
-    private func handle(_ event: InstallEvent, for appID: UInt32) {
-        guard let download = downloads[appID] else { return }
-        switch event {
-        case .status(let status):
-            download.status = status
-        case .progress(let progress):
-            download.progress = progress
-        case .prompt(.mobileConfirmation):
-            download.status = "Approve the sign-in in the Steam Mobile app…"
-        case .prompt(let prompt):
-            self.prompt = PendingPrompt(appID: appID, prompt: prompt)
-        case .finished(.success):
-            downloads[appID] = nil
-            installed.insert(appID)
-        case .finished(.failure(let error)):
-            downloads[appID] = nil
-            if prompt?.appID == appID { prompt = nil }
-            if error.description != "Download cancelled" { errorMessage = error.description }
-        }
+    func verify(_ game: SteamGame) {
+        let appID = game.appID
+        request("verify \(game.name)") { try $0.open("steam://validate/\(appID)") }
     }
-
-    // MARK: Play
 
     func play(_ game: SteamGame) {
         let appID = game.appID
-        let backend = backend(for: game)
         launching.insert(appID)
+        request("launch \(game.name)") { try $0.launch(appID: appID) }
         Task {
-            defer { launching.remove(appID) }
-            do {
-                running[appID] = try await Task.detached(priority: .userInitiated) {
-                    let launch = Library.launch(try Library.game(appID: appID))
-                    let prefix = try Prefix.forApp(appID, backend: backend)
-                    try prefix.prepare()
-                    _ = try prefix.linkCloudSaves(appID: appID)
-                    let command = prefix.gameCommand(appID: appID, exe: launch.exe,
-                                                     workingDirectory: launch.workingDirectory, arguments: launch.arguments)
-                    return try GameSession(prefix: prefix, command: command) { _ in
-                        Task { @MainActor in self.running[appID] = nil }
-                    }
-                }.value
-            } catch {
-                errorMessage = "Couldn't launch \(game.name): \(error)"
-            }
+            try? await Task.sleep(for: .seconds(20))
+            launching.remove(appID)
         }
     }
 
-    func stop(_ game: SteamGame) {
-        guard let session = running[game.appID] else { return }
-        Task.detached { session.stop() }
+    func showInSteam(_ game: SteamGame) {
+        let appID = game.appID
+        request("open \(game.name) in Steam") { try $0.open("steam://nav/games/details/\(appID)") }
     }
 
-    // MARK: Files
-
-    func uninstall(_ game: SteamGame) {
-        do {
-            try FileManager.default.removeItem(at: Library.directory(appID: game.appID))
-            installed.remove(game.appID)
-        } catch {
-            errorMessage = "Couldn't uninstall \(game.name): \(error)"
-        }
-    }
-
-    func revealInstall(_ game: SteamGame) {
-        NSWorkspace.shared.activateFileViewerSelecting([Library.directory(appID: game.appID)])
-    }
-
-    func openLog(_ game: SteamGame) {
-        let log = Paths.prefixes.appending(path: "\(game.appID)/neutron.log")
-        if FileManager.default.fileExists(atPath: log.path) {
-            NSWorkspace.shared.open(log)
-        } else {
-            errorMessage = "\(game.name) hasn't been launched yet."
-        }
-    }
-
-    func openInSteam(_ game: SteamGame) {
-        NSWorkspace.shared.open(URL(string: "steam://nav/games/details/\(game.appID)")!)
+    func showDownloads() {
+        request("open Steam's downloads") { try $0.open("steam://open/downloads") }
     }
 
     func openStorePage(_ game: SteamGame) {
-        NSWorkspace.shared.open(URL(string: "steam://store/\(game.appID)")!)
+        NSWorkspace.shared.open(URL(string: "https://store.steampowered.com/app/\(game.appID)")!)
     }
 
-    func launchSteam() {
-        NSWorkspace.shared.open(URL(string: "steam://open/main")!)
+    func revealInstall(_ game: SteamGame) {
+        guard let dir = states[game.appID]?.directory else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 }

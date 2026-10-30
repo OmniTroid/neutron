@@ -11,18 +11,14 @@ public struct NeutronError: Error, CustomStringConvertible {
 public enum Paths {
     public static let home = FileManager.default.homeDirectoryForCurrentUser
 
-    public static let steam = home.appending(path: "Library/Application Support/Steam")
-    public static let steamClient = steam.appending(path: "Steam.AppBundle/Steam/Contents/MacOS")
+    public static let neutron = home.appending(path: "Library/Application Support/Neutron")
+    public static let runtimes = neutron.appending(path: "runtimes")
+    /// The Wine prefix holding Valve's Windows Steam client.
+    public static let steamPrefix = neutron.appending(path: "steam")
+    public static let steam = steamPrefix.appending(path: "drive_c/Program Files (x86)/Steam")
     public static let steamAppInfo = steam.appending(path: "appcache/appinfo.vdf")
     public static let steamPackageInfo = steam.appending(path: "appcache/packageinfo.vdf")
     public static let steamLibraryCache = steam.appending(path: "appcache/librarycache")
-
-    public static let neutron = home.appending(path: "Library/Application Support/Neutron")
-    public static let prefixes = neutron.appending(path: "prefixes")
-    public static let library = neutron.appending(path: "library")
-    public static let config = neutron.appending(path: "config.json")
-    public static let depotDownloader = neutron.appending(path: "depotdownloader/DepotDownloader")
-    public static let runtimes = neutron.appending(path: "runtimes")
 
     /// Built runtimes: $NEUTRON_DIST, else the app bundle's SharedSupport/dist, else the nearest `dist/`
     /// above the executable (a repo checkout).

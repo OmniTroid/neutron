@@ -10,13 +10,13 @@ Neutron runs x86_64 Wine through Rosetta for Mac apps, which is going away for s
 Valve's stance: on [Proton#10087](https://github.com/ValveSoftware/Proton/pull/10087) (building Proton on macOS
 hosts), a Valve member wrote it's "difficult to advocate for any solution that depends on Rosetta 2" given the
 phase-out. A reply posted as Apple's Developer Ecosystem Engineering confirmed Linux VM translation is separate from
-that deprecation. Expect the same objection to upstreaming Neutron's macOS lsteamclient changes while Neutron
-depends on Rosetta for Mac apps.
+that deprecation. Expect the same objection to anything Neutron asks of Valve while it depends on Rosetta for Mac
+apps.
 
 Ways off Rosetta for Mac apps:
 
-- **Native arm64 Wine with an in-process x86 emulator** (FEX as the WoW64/ARM64EC translator). Keeps DXMT, Metal
-  and the Mac Steam bridge, and is the version of Neutron Valve could reasonably engage with. Preferred for the main
+- **Native arm64 Wine with an in-process x86 emulator** (FEX as the WoW64/ARM64EC translator). Keeps DXMT and Metal,
+  and is the version of Neutron Valve could reasonably engage with. Preferred for the main
   path. It exists:
   - CodeWeavers ships it in [CrossOver Preview](https://www.codeweavers.com/blog/mjohnson/2026/7/31/crossover-preview-the-right-to-bear-arm64-on-mac)
     (2026-07-31) with a custom macOS port of FEX and arm64 DXMT; CrossOver 27 is targeted for early 2027.

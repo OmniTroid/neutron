@@ -23,9 +23,6 @@ public struct CompatDB: Decodable, Sendable {
 
         public var usesVAC: Bool { anticheat?.names?.contains("VAC") ?? false }
 
-        /// The renderer highball-db recommends, when Neutron has it.
-        public var backend: Backend? { renderer.flatMap(Backend.init(rawValue:)) }
-
         /// Only entries someone ran; anti-cheat-only rows carry no playability verdict.
         public var tested: Bool { status != "anticheat-only" }
     }

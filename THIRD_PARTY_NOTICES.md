@@ -10,18 +10,16 @@ Neutron's own code is under the BSD 3-Clause License in `LICENSE`. Full license 
 
 | Component | License | Source |
 |---|---|---|
-| Wine 11.18 `winemac.drv` (`patches/winemac-dxmt.patch`) | LGPL-2.1-or-later (`Wine-LGPL-2.1.txt`) | <https://dl.winehq.org/wine/source/11.x/wine-11.18.tar.xz> plus the patch in this repository |
-| Proton `lsteamclient` (`patches/lsteamclient-macos.patch`) | Steamworks SDK License, Copyright Valve Corporation (`lsteamclient-Steamworks-SDK.txt`) | <https://github.com/ValveSoftware/Proton> at the commit in `versions.env`, plus the patch in this repository |
-| Proton `steam_helper` (`steam.exe`) | BSD-3-Clause, Copyright (c) 2015-2022 Valve Corporation (`Proton-BSD-3-Clause.txt`) | same as above, unmodified |
+| Wine from CrossOver 26.3.0 sources | LGPL-2.1-or-later (`Wine-LGPL-2.1.txt`) | <https://github.com/OmniTroid/wine> at the commit pinned by the `external/wine` submodule; base: <https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz> |
+| DXMT | MIT, Copyright (c) 2023 Feifan He (`DXMT-MIT.txt`) | <https://github.com/OmniTroid/dxmt> at the commit pinned by the `external/dxmt` submodule; upstream <https://github.com/3Shain/dxmt> |
 
 ## Bundled in Neutron.app
 
 | Component | License | Source |
 |---|---|---|
-| Wine 11.18 (macOS build by Gcenx) | LGPL-2.1-or-later (`Wine-LGPL-2.1.txt`) | <https://github.com/Gcenx/macOS_Wine_builds/releases/tag/11.18>, <https://gitlab.winehq.org/wine/wine> |
-| wine-mono 11.3.0 | MIT and others (`SPDX-MIT.txt`, see upstream) | <https://gitlab.winehq.org/mono/wine-mono> |
+| wine-mono 10.4.1 | MIT and others (`SPDX-MIT.txt`, see upstream) | <https://gitlab.winehq.org/mono/wine-mono> |
 | wine-gecko 2.47.4 | MPL-2.0 (`SPDX-MPL-2.0.txt`) | <https://gitlab.winehq.org/wine/wine-gecko> |
-| DXMT v0.80 | MIT, Copyright (c) 2023 Feifan He (`DXMT-MIT.txt`) | <https://github.com/3Shain/dxmt/releases/tag/v0.80> |
+| LLVM 15.0.7, linked into DXMT's `winemetal.so` | Apache-2.0 WITH LLVM-exception (`LLVM-Apache-2.0-with-LLVM-exception.txt`) | <https://github.com/llvm/llvm-project/tree/llvmorg-15.0.7> |
 | MoltenVK | Apache-2.0 (`MoltenVK-Apache-2.0.txt`) | <https://github.com/KhronosGroup/MoltenVK> |
 | Vulkan Loader | Apache-2.0 (`SPDX-Apache-2.0.txt`) | <https://github.com/KhronosGroup/Vulkan-Loader> |
 | Sparkle 2.10.0 | MIT (`Sparkle-MIT.txt`) | <https://github.com/sparkle-project/Sparkle> |
@@ -29,7 +27,7 @@ Neutron's own code is under the BSD 3-Clause License in `LICENSE`. Full license 
 | Are We Anti-Cheat Yet? data, via highball-db (`data/compat.json`) | MIT, Copyright (c) 2021 Starz0r, Curve (`highball-db-anticheat-MIT.txt`) | <https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet> |
 | swift-argument-parser 1.5.0 | Apache-2.0 with Runtime Library Exception (`swift-argument-parser-Apache-2.0.txt`) | <https://github.com/apple/swift-argument-parser> |
 
-### Support libraries in the Wine build (built by MacPorts)
+### Support libraries for Wine (from Gcenx's Wine 11.18 build, built by MacPorts)
 
 | Library | License |
 |---|---|
@@ -64,4 +62,4 @@ available from the upstream projects above and the MacPorts ports they were buil
 
 | Component | License | Source |
 |---|---|---|
-| DepotDownloader 3.4.0 | GPL-2.0 | <https://github.com/SteamRE/DepotDownloader> |
+| Steam for Windows (`SteamSetup.exe`), installed unmodified into Neutron's Wine prefix | Steam Subscriber Agreement, Copyright Valve Corporation | <https://store.steampowered.com/about/> |

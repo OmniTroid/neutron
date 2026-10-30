@@ -7,7 +7,7 @@
     <true/>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
-    <!-- the Steam bridge loads Valve-signed steamclient.dylib -->
+    <!-- Wine loads host libraries and DLLs at runtime -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>
