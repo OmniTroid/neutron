@@ -13,7 +13,8 @@ chains in Wine's `winemac.drv` and in DXMT, the latter enabled with `DXMT_ALLOW_
 
 ## VAC
 
-Unverified. VAC runs in user mode inside the client and the game, so Valve's real client is the setup where it could
+Unverified. Neutron launches every game with `-insecure` (Source games then skip VAC and secured servers), but a
+game started from Steam's own window doesn't get it. VAC runs in user mode inside the client and the game, so Valve's real client is the setup where it could
 work, but nobody has shown it accepting Wine on macOS. highball-db's own Counter-Strike 2 and Team Fortress 2 entries
 record bot matches and main menus only.
 

@@ -106,8 +106,9 @@ public struct WindowsSteam: Sendable {
         try open("steam://uninstall/\(appID)")
     }
 
+    /// `-insecure` keeps VAC out of games until VAC is verified under Wine on macOS (see docs/steam.md).
     public func launch(appID: UInt32) throws {
-        try forward(["-applaunch", String(appID)])
+        try forward(["-applaunch", String(appID), "-insecure"])
     }
 
     /// Hands a steam:// URL to the client, e.g. `steam://nav/games/details/<appid>`.
