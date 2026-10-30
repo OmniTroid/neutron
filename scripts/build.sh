@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds dist/: Wine (external/wine) as dist/wine and DXMT (external/dxmt) as dist/overlays/dxmt.
-# WINE_SRC / DXMT_SRC override a submodule with a local checkout, a ref of its remote, or <git URL>#<ref>
-# (a local repository works as the URL).
+# Builds dist/: Wine (external/wine) as dist/wine and DXMT (external/dxmt) as dist/overlays/dxmt, from whatever the
+# submodules have checked out (`git submodule update` returns them to the pins). WINE_SRC / DXMT_SRC instead take a
+# local checkout, a ref of the submodule's remote, or <git URL>#<ref>.
 # Needs Homebrew bison, meson, ninja, cmake, mingw-w64, freetype, gnutls and sdl2 (headers), and Xcode's Metal toolchain.
 set -euo pipefail
 
@@ -10,11 +10,11 @@ source "$ROOT/versions.env"
 B="$ROOT/build"
 
 # Source tree for submodule $1, given override $2: a local checkout is used as is; a ref, or <git URL>#<ref>,
-# is checked out in the submodule itself, so the build stays incremental (`git submodule update` restores the pin)
+# is checked out in the submodule itself, so the build stays incremental
 source_tree() {
     local name=$1 spec=$2 sub="$ROOT/external/$1"
     if [ -d "$spec" ]; then (cd "$spec" && pwd); return; fi
-    if [ -z "$spec" ] || [ ! -e "$sub/.git" ]; then
+    if [ ! -e "$sub/.git" ]; then
         git -C "$ROOT" submodule update -q --init --recursive "external/$name" >&2 || return 1
     fi
     if [ -n "$spec" ]; then
