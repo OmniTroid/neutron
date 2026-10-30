@@ -4,4 +4,4 @@
 [submodule "external/dxmt"]
 	path = external/dxmt
 	url = git@github.com:OmniTroid/dxmt.git
-	branch = d3d9
+	branch = main
