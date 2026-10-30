@@ -23,8 +23,8 @@ public struct WindowsSteam: Sendable {
         // the runtime's host libraries (GnuTLS, FreeType, MoltenVK); Wine dlopens them by bare name
         let lib = wine.deletingLastPathComponent().deletingLastPathComponent().appending(path: "lib").path
         env["DYLD_FALLBACK_LIBRARY_PATH"] = [lib, env["DYLD_FALLBACK_LIBRARY_PATH"]].compactMap { $0 }.joined(separator: ":")
-        // loaddll shows which renderer each process loads; see GraphicsCheck
-        env["WINEDEBUG"] = "-all,+pid,+loaddll"
+        // loaddll shows which renderer each process loads (see GraphicsCheck); the caller's WINEDEBUG adds channels
+        env["WINEDEBUG"] = ["-all,+pid,+loaddll", env["WINEDEBUG"]].compactMap { $0 }.joined(separator: ",")
         // DXMT, never a copy a game ships (e.g. DXVK)
         env["WINEDLLOVERRIDES"] = "d3d9,d3d10core,d3d11,dxgi=b;winemenubuilder.exe=d;winedbg.exe=d"
         // Steam's UI hangs under Wine's msync/esync
