@@ -193,18 +193,18 @@ public struct WindowsSteam: Sendable {
 
     /// The UI process the client starts once it is past its updater.
     func userInterfaceIsUp() -> Bool {
-        processCommandLines().contains { $0.lowercased().contains("steamwebhelper.exe") }
+        Self.processCommandLines().contains { $0.lowercased().contains("steamwebhelper.exe") }
     }
 
     /// Steam relaunches itself after updating, so the process Neutron started isn't a reliable signal.
     func steamProcessExists() -> Bool {
-        processCommandLines().contains { $0.lowercased().contains(#"steam\steam.exe"#) }
+        Self.processCommandLines().contains { $0.lowercased().contains(#"steam\steam.exe"#) }
     }
 
-    func processCommandLines() -> [String] {
+    static func processCommandLines() -> [String] {
         let ps = Process()
         ps.executableURL = URL(filePath: "/bin/ps")
-        ps.arguments = ["-axo", "command"]
+        ps.arguments = ["-axww", "-o", "command="]
         let pipe = Pipe()
         ps.standardOutput = pipe
         guard (try? ps.run()) != nil else { return [] }

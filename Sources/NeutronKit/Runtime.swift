@@ -24,6 +24,9 @@ public enum Runtime {
         let stamp = try fingerprint(base: base, overlay: overlay)
         let stampURL = target.appending(path: ".neutron-runtime")
         if (try? String(contentsOf: stampURL, encoding: .utf8)) == stamp { return target }
+        // replacing files under a running wineserver breaks every process it starts afterwards
+        if fm.fileExists(atPath: target.path),
+           WindowsSteam.processCommandLines().contains(where: { $0.contains(target.path + "/") }) { return target }
 
         try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         let staging = target.deletingLastPathComponent().appending(path: ".\(target.lastPathComponent)-\(UUID().uuidString)")
