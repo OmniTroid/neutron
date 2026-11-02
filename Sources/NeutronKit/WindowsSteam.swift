@@ -27,7 +27,7 @@ public struct WindowsSteam: Sendable {
         env["DYLD_FALLBACK_LIBRARY_PATH"] = [lib, env["DYLD_FALLBACK_LIBRARY_PATH"]].compactMap { $0 }.joined(separator: ":")
         // loaddll shows which renderer each process loads (see GraphicsCheck); the caller's WINEDEBUG adds channels
         env["WINEDEBUG"] = ["-all,+pid,+loaddll", env["WINEDEBUG"]].compactMap { $0 }.joined(separator: ",")
-        // DXMT, never a copy a game ships (e.g. DXVK); an old game's own ddraw wrapper can bring it to DXMT's D3D9
+        // DXMT, never a shipped copy of D3D (e.g. DXVK); a shipped ddraw.dll may be a wrapper over D3D9, and so over DXMT
         env["WINEDLLOVERRIDES"] = "d3d9,d3d10core,d3d11,d3d12,d3d12core,dxgi=b;ddraw=n,b;winemenubuilder.exe=d;winedbg.exe=d"
         // Steam's UI hangs under Wine's msync/esync
         env["WINEMSYNC"] = "0"
