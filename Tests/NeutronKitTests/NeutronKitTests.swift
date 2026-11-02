@@ -313,3 +313,54 @@ struct RuntimeDXMTTests {
         #expect(throws: NeutronError.self) { try Runtime.url(dist: dist, cache: dist.appending(path: "cache")) }
     }
 }
+
+struct RecentProgramsTests {
+    private func programs() throws -> (RecentPrograms, URL) {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return (RecentPrograms(file: dir.appending(path: "nested/recent.json")), dir)
+    }
+
+    private func exe(_ name: String, in dir: URL) throws -> URL {
+        let url = dir.appending(path: name)
+        try Data().write(to: url)
+        return url
+    }
+
+    @Test func newestFirstWithoutDuplicates() throws {
+        let (recent, dir) = try programs()
+        let a = try exe("a.exe", in: dir), b = try exe("b.exe", in: dir)
+        recent.record(a)
+        recent.record(b)
+        recent.record(a)
+        #expect(recent.load().map(\.lastPathComponent) == ["a.exe", "b.exe"])
+    }
+
+    @Test func skipsInstallers() throws {
+        let (recent, dir) = try programs()
+        for name in ["setup_game.exe", "Install.exe", "unins000.exe"] {
+            recent.record(try exe(name, in: dir))
+        }
+        #expect(recent.load().isEmpty)
+    }
+
+    @Test func hidesMissingAndRemoves() throws {
+        let (recent, dir) = try programs()
+        let a = try exe("a.exe", in: dir), b = try exe("b.exe", in: dir)
+        recent.record(a)
+        recent.record(b)
+        try FileManager.default.removeItem(at: a)
+        #expect(recent.load() == [b])
+        recent.remove(b)
+        #expect(recent.load().isEmpty)
+    }
+
+    @Test func keepsTheLimit() throws {
+        let (recent, dir) = try programs()
+        for i in 0...RecentPrograms.limit {
+            recent.record(try exe("game\(i).exe", in: dir))
+        }
+        #expect(recent.load().count == RecentPrograms.limit)
+        #expect(recent.load().first?.lastPathComponent == "game\(RecentPrograms.limit).exe")
+    }
+}

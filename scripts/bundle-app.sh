@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds build/Neutron.app (with the Wine runtime) and build/Neutron.dmg, versioned $NEUTRON_VERSION.
 # Signs with the "Developer ID Application" certificate of $NEUTRON_TEAM_ID when it is in the keychain
-# (ad-hoc otherwise), and notarizes when the notarytool keychain profile $NEUTRON_NOTARY_PROFILE exists.
+# (ad-hoc otherwise). Notarizes only with NEUTRON_NOTARIZE=1, as releases do, using the notarytool keychain
+# profile $NEUTRON_NOTARY_PROFILE.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -119,7 +120,9 @@ notarize() {
 }
 
 NOTARIZE=false
-if [ -n "$IDENTITY" ] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+if [ "${NEUTRON_NOTARIZE:-}" != 1 ]; then
+    :
+elif [ -n "$IDENTITY" ] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
     NOTARIZE=true
 elif [ -n "$IDENTITY" ]; then
     echo "not notarized: create the profile once with"
