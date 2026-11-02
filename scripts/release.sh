@@ -14,7 +14,7 @@ APP="$ROOT/build/Neutron.app"
 git -C "$ROOT" fetch -q origin
 [ "$(git -C "$ROOT" rev-parse HEAD)" = "$(git -C "$ROOT" rev-parse @{u})" ] || { echo "push main first" >&2; exit 1; }
 
-NEUTRON_VERSION="$VERSION" "$ROOT/scripts/bundle-app.sh"
+NEUTRON_NOTARIZE=1 NEUTRON_VERSION="$VERSION" "$ROOT/scripts/bundle-app.sh"
 xcrun stapler validate "$APP" >/dev/null || { echo "Neutron.app is not notarized, refusing to publish" >&2; exit 1; }
 BUILD=$(defaults read "$APP/Contents/Info.plist" CFBundleVersion)
 
