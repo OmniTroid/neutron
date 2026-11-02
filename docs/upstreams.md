@@ -24,7 +24,7 @@ git -C "$tmp/upstream" log --oneline 695dbe2a..HEAD    # the table's commit
 rm -rf "$tmp/upstream/.git"
 (cd "$tmp/upstream"
  grep -rIl -i mullion . | xargs perl -pi -e 's#dttdrv/mullion#OmniTroid/dxmt#g; s/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g'
- find . -depth -iname '*mullion*' -execdir sh -c 'mv "$1" "$(echo "$1" | perl -pe "s/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g")"' _ {} \;)
+ find . -depth -iname '*mullion*' | while read -r f; do mv "$f" "$(dirname "$f")/$(basename "$f" | perl -pe 's/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g')"; done)
 mkdir "$tmp/base" && git archive aaff4fdd | tar -x -C "$tmp/base"
 git diff --no-index --stat "$tmp/base" "$tmp/upstream"
 git switch -c upstream-$(date +%Y%m%d) origin/main
