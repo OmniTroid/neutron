@@ -8,7 +8,7 @@ final class AppModel {
     var startingGame = false
     var errorMessage: String?
     private var reported: Set<String> = []
-    private var steam: WindowsSteam?
+    private var steam: Task<WindowsSteam, Error>?
 
     /// Warns about anything not rendering with DXMT while the window is open.
     func monitor() async {
@@ -25,11 +25,16 @@ final class AppModel {
     }
 
     private func client() async throws -> WindowsSteam {
-        if let steam { return steam }
-        // the first call assembles the runtime, which copies files
-        let steam = try await Task.detached(priority: .userInitiated) { try WindowsSteam() }.value
+        // the first call assembles the runtime, which copies files: everything that asks at startup shares it
+        if let steam { return try await steam.value }
+        let steam = Task.detached(priority: .userInitiated) { try WindowsSteam() }
         self.steam = steam
-        return steam
+        do {
+            return try await steam.value
+        } catch {
+            self.steam = nil
+            throw error
+        }
     }
 
     func launchSteam() {
