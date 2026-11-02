@@ -4,7 +4,12 @@ import SwiftUI
 /// Sparkle's standard updater; it reads the feed URL and public key from Info.plist.
 @MainActor
 final class Updater: ObservableObject {
+    #if DEBUG
+    // a debug build has no bundle or feed for Sparkle to update from
+    let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
+    #else
     let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    #endif
     @Published var canCheckForUpdates = false
 
     init() {

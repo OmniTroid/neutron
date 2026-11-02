@@ -191,6 +191,21 @@ public struct WindowsSteam: Sendable {
         return process
     }
 
+    /// Runs a Windows program of the user's choosing in this prefix, from its own directory.
+    public func launch(program: URL) throws {
+        try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let output = try FileHandle(forWritingTo: log)
+        let process = Process()
+        process.executableURL = wine
+        process.arguments = [program.path]
+        process.currentDirectoryURL = program.deletingLastPathComponent()
+        process.environment = environment
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+    }
+
     /// The UI process the client starts once it is past its updater.
     func userInterfaceIsUp() -> Bool {
         Self.processCommandLines().contains { $0.lowercased().contains("steamwebhelper.exe") }

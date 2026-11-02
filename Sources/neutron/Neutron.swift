@@ -8,7 +8,7 @@ struct Neutron: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Run Valve's Windows Steam client on macOS through Wine and DXMT.",
         discussion: "Neutron runs the unmodified client with its window shown and uses only Steam's own command-line options and steam:// URLs. Sign in, confirm installs and accept prompts in Steam's window.",
-        subcommands: [Start.self, Status.self, Stop.self, List.self, Install.self, Uninstall.self, Launch.self,
+        subcommands: [Start.self, Run.self, Status.self, Stop.self, List.self, Install.self, Uninstall.self, Launch.self,
                       Compat.self, Wine.self]
     )
 }
@@ -16,8 +16,16 @@ struct Neutron: AsyncParsableCommand {
 struct Start: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Install Steam if needed and start it, or show its window.")
     @Flag(help: "Start in the tray without opening the window.") var silent = false
+    @Option(help: "Write every D3D12 shader games use to this directory, for tests/perf. Keep it out of any repo.")
+    var dumpShaders: String?
 
     func run() async throws {
+        if let dumpShaders {
+            let directory = URL(filePath: dumpShaders).standardizedFileURL
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            setenv("DXMT_SHADER_DUMP_ALL", "1", 1)
+            setenv("DXMT_SHADER_DUMP_PATH", "Z:" + directory.path.replacingOccurrences(of: "/", with: "\\"), 1)
+        }
         print("starting Steam (the first start downloads and installs its update)…")
         let steam = try WindowsSteam()
         try await steam.start(silent: silent)
@@ -26,6 +34,15 @@ struct Start: AsyncParsableCommand {
             NSRunningApplication(processIdentifier: pid)?.activate()
         }
         print("running; sign in through Steam's window if you haven't")
+    }
+}
+
+struct Run: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Run a Windows program from outside Steam, in a prefix of its own.")
+    @Argument(help: "The .exe file.") var program: String
+
+    func run() throws {
+        try WindowsSteam(prefix: Paths.gamesPrefix).launch(program: URL(filePath: program).standardizedFileURL)
     }
 }
 

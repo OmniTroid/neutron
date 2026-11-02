@@ -15,6 +15,8 @@ public enum Paths {
     public static let runtimes = neutron.appending(path: "runtimes")
     /// The Wine prefix holding Valve's Windows Steam client.
     public static let steamPrefix = neutron.appending(path: "steam")
+    /// The Wine prefix for games from outside Steam, which can't read Steam's sign-in.
+    public static let gamesPrefix = neutron.appending(path: "games")
     public static let steam = steamPrefix.appending(path: "drive_c/Program Files (x86)/Steam")
     public static let steamAppInfo = steam.appending(path: "appcache/appinfo.vdf")
     public static let steamPackageInfo = steam.appending(path: "appcache/packageinfo.vdf")
