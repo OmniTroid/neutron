@@ -267,6 +267,14 @@ struct GraphicsCheckTests {
         #expect(fallbacks.map(\.what).prefix(5) == ["wined3d.dll", "dxgi.dll", "winevulkan.dll", "d3d12.dll", "d3d12core.dll"])
     }
 
+    @Test func leavesUnrealsBrowserHelperAlone() {
+        let log = #"""
+        0020:0024:trace:loaddll:build_module Loaded L"C:\\Games\\Engine\\EpicWebHelper.exe" at 140000000: native
+        0020:0024:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\winevulkan.dll" at 6FFFE6ED0000: builtin
+        """#
+        #expect(GraphicsCheck.fallbacks(inLog: log).isEmpty)
+    }
+
     @Test func flagsSteamSoftwareRendering() {
         let old = "[2026-10-30 10:00:00] Startup - webhelper launched pid: 1\n[2026-10-30 10:00:01] Disabling GPU acceleration due to --disable-gpu (browser)\n"
         let current = "[2026-10-30 11:00:00] Startup - webhelper launched pid: 2\n[2026-10-30 11:00:01] Starting message loop\n"

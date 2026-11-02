@@ -163,7 +163,8 @@ public struct WindowsSteam: Sendable {
     }
 
     public func status() throws -> Status {
-        guard steamProcessExists() else { return Status(running: false, signedIn: false, fallbacks: fallbacks()) }
+        // the logs are of the last session: with none running, they say nothing about what renders now
+        guard steamProcessExists() else { return Status(running: false, signedIn: false, fallbacks: sessionRunning() ? fallbacks() : []) }
         let activeUser = try registryValue(#"HKCU\Software\Valve\Steam\ActiveProcess"#, "ActiveUser").flatMap(WindowsSteam.dword)
         let runningApp = try registryValue(#"HKCU\Software\Valve\Steam"#, "RunningAppID").flatMap(WindowsSteam.dword)
         return Status(running: true, signedIn: (activeUser ?? 0) != 0,
@@ -181,6 +182,7 @@ public struct WindowsSteam: Sendable {
     }
 
     func launch(_ arguments: [String]) throws -> Process {
+        try? FileManager.default.removeItem(at: programLog)
         FileManager.default.createFile(atPath: log.path, contents: nil)
         let output = try FileHandle(forWritingTo: log)
         let process = Process()
@@ -206,6 +208,12 @@ public struct WindowsSteam: Sendable {
         process.standardOutput = output
         process.standardError = output
         try process.run()
+    }
+
+    /// Whether any program runs in this runtime, Steam or not: Wine keeps a wineserver while one does.
+    func sessionRunning() -> Bool {
+        let server = wine.deletingLastPathComponent().appending(path: "wineserver").path
+        return Self.processCommandLines().contains { $0.hasPrefix(server) }
     }
 
     /// The UI process the client starts once it is past its updater.
