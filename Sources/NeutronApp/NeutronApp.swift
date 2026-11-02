@@ -78,6 +78,7 @@ struct ContentView: View {
             case .failure(let error): model.errorMessage = "Couldn't open the file: \(error.localizedDescription)"
             }
         }
+        .onOpenURL { model.load(game: $0) }
         .task { await model.monitor() }
         #if DEBUG
         .task { await debugSnapshot() }
