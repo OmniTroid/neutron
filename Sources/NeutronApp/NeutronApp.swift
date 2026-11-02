@@ -51,6 +51,7 @@ struct SettingsView: View {
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @State private var choosingGame = false
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 12) {
@@ -95,7 +96,7 @@ extension ContentView {
     /// NEUTRON_SNAPSHOT=<png>: render the window to a PNG and quit, for design review.
     func debugSnapshot() async {
         if ProcessInfo.processInfo.environment["NEUTRON_SHOW_SETTINGS"] != nil {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            openSettings()
         }
         guard let path = ProcessInfo.processInfo.environment["NEUTRON_SNAPSHOT"] else { return }
         try? await Task.sleep(for: .seconds(1))
