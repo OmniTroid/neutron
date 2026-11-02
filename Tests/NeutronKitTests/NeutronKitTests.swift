@@ -364,3 +364,20 @@ struct RecentProgramsTests {
         #expect(recent.load().first?.lastPathComponent == "game\(RecentPrograms.limit).exe")
     }
 }
+
+struct RuntimeFingerprintTests {
+    @Test func changesWhenAnyWineFileIsRebuilt() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        let base = root.appending(path: "wine"), overlay = root.appending(path: "overlay")
+        let dll = base.appending(path: "lib/wine/i386-windows/dmime.dll")
+        try fm.createDirectory(at: dll.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: overlay, withIntermediateDirectories: true)
+        try Data("same size".utf8).write(to: dll)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1000)], ofItemAtPath: dll.path)
+        let before = try Runtime.fingerprint(base: base, overlay: overlay)
+        try Data("SAME SIZE".utf8).write(to: dll)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2000)], ofItemAtPath: dll.path)
+        #expect(try Runtime.fingerprint(base: base, overlay: overlay) != before)
+    }
+}
