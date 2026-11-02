@@ -106,6 +106,8 @@ find "$APP/Contents/SharedSupport" -type f -print0 | while IFS= read -r -d '' fi
         "${SIGN[@]}" "$file" 2>&1 | grep -v "replacing existing signature" || true
     fi
 done
+# its Info.plist has to be sealed with the loader in it, or macOS kills the loader
+"${SIGN[@]}" "$APP/Contents/SharedSupport/dist/wine/lib/wine/x86_64-unix/wine.app"
 "${SIGN[@]}" "$APP/Contents/Helpers/neutron"
 "${SIGN[@]}" "$APP"
 codesign --verify --strict --deep "$APP"
