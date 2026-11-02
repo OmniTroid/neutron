@@ -1,6 +1,6 @@
 # Neutron
 
-A macOS frontend for Valve's Windows Steam client, running unmodified under CrossOver's Wine ([OmniTroid/wine](https://github.com/OmniTroid/wine)) with DXMT ([OmniTroid/dxmt](https://github.com/OmniTroid/dxmt)) for Direct3D 10/11. Steam installs, updates and launches the games; Neutron only uses Steam's own command-line options and `steam://` URLs, as [Highball](https://github.com/gauthierpiarrette/highball) does.
+A macOS frontend for Valve's Windows Steam client, running unmodified under CrossOver's Wine ([OmniTroid/wine](https://github.com/OmniTroid/wine)) with DXMT ([OmniTroid/dxmt](https://github.com/OmniTroid/dxmt)) for Direct3D 9 to 12. Steam installs, updates and launches the games; Neutron only uses Steam's own command-line options and `steam://` URLs, as [Highball](https://github.com/gauthierpiarrette/highball) does.
 
 ```sh
 git submodule update --init --recursive

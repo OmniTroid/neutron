@@ -11,7 +11,7 @@ Neutron's own code is under the BSD 3-Clause License in `LICENSE`. Full license 
 | Component | License | Source |
 |---|---|---|
 | Wine from CrossOver 26.3.0 sources | LGPL-2.1-or-later (`Wine-LGPL-2.1.txt`) | <https://github.com/OmniTroid/wine> at the commit pinned by the `external/wine` submodule; base: <https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz> |
-| DXMT | MIT, Copyright (c) 2023 Feifan He (`DXMT-MIT.txt`) | <https://github.com/OmniTroid/dxmt> at the commit pinned by the `external/dxmt` submodule; upstream <https://github.com/3Shain/dxmt> |
+| DXMT | LGPL-2.1-or-later (`Wine-LGPL-2.1.txt`); code from its releases up to v0.80 is also MIT, Copyright (c) 2023 Feifan He (`DXMT-MIT.txt`) | <https://github.com/OmniTroid/dxmt> at the commit pinned by the `external/dxmt` submodule; based on <https://github.com/3Shain/dxmt> and <https://github.com/dttdrv/mullion> (also LGPL-2.1-or-later) |
 
 ## Bundled in Neutron.app
 

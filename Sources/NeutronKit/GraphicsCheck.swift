@@ -11,13 +11,15 @@ public enum GraphicsCheck {
         public var description: String { "\(process): \(what): \(reason)" }
     }
 
-    static let dxmtLibraries: Set<String> = ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "dxgi.dll"]
+    static let dxmtLibraries: Set<String> = ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll"]
 
-    static func reason(library: String, native: Bool) -> String? {
+    static func reason(library: String, native: Bool, wow64: Bool = false) -> String? {
         switch library {
+        // DXMT's Direct3D 12 is 64-bit only
+        case "d3d12.dll" where wow64 && !native, "d3d12core.dll" where wow64 && !native: "Wine's Direct3D 12 (vkd3d), not DXMT"
         case "wined3d.dll": "Wine's wined3d (OpenGL) instead of DXMT"
-        // DXMT's d3d12.dll replaces Wine's but has no d3d12core.dll, so a builtin one is vkd3d's
-        case "d3d12core.dll": native ? "the program's own Direct3D 12 runtime, not DXMT" : "Wine's Direct3D 12 (vkd3d), not DXMT"
+        case "vulkan-1.dll", "winevulkan.dll": "Vulkan instead of DXMT"
+        case "d3d12core.dll" where native: "the program's own Direct3D 12 runtime, not DXMT"
         case _ where dxmtLibraries.contains(library) && native: "the program's own \(library) instead of DXMT's"
         default: nil
         }
@@ -49,7 +51,7 @@ public enum GraphicsCheck {
             }
             // Chromium's GPU info process probes Direct3D 12 and exits; Steam's fallback shows in its own logs instead
             guard processes[pid] != "steamwebhelper.exe",
-                  let reason = reason(library: library, native: line.hasSuffix(": native")) else { continue }
+                  let reason = reason(library: library, native: line.hasSuffix(": native"), wow64: path.lowercased().contains("syswow64")) else { continue }
             let fallback = Fallback(process: processes[pid] ?? "process \(pid)", what: library, reason: reason)
             if line.contains("Unloaded module") {
                 if let index = held.lastIndex(of: fallback) { held.remove(at: index) }

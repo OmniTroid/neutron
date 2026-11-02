@@ -34,7 +34,7 @@ DIST="$ROOT/dist"
 JOBS=$(sysctl -n hw.ncpu)
 BREW=$(brew --prefix)
 export PATH="$BREW/opt/bison/bin:$PATH"
-export MACOSX_DEPLOYMENT_TARGET=14.0
+export MACOSX_DEPLOYMENT_TARGET=15.0
 
 fetch() {
     local url=$1 sha=$2 out=$3
@@ -106,7 +106,6 @@ fi
 DX="$DXMT_SRC"
 DXMT_OPTIONS=()
 grep -q "'enable_d3d9'" "$DX/meson.options" 2>/dev/null && DXMT_OPTIONS+=(-Denable_d3d9=true)
-grep -q "'enable_d3d12'" "$DX/meson.options" 2>/dev/null && DXMT_OPTIONS+=(-Denable_d3d12=true)
 rm -rf "$B/dxmt-install"
 DXMT_KEY="$DX $OBJ ${DXMT_OPTIONS[*]:-}"
 for arch in 64 32; do

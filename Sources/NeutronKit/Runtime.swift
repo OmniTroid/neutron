@@ -2,8 +2,9 @@ import Foundation
 
 public enum Runtime {
     /// Files without which Wine would render with its own wined3d instead.
-    static let dxmtFiles = ["d3d10core.dll", "d3d11.dll", "d3d12.dll", "dxgi.dll", "winemetal.dll"]
-        .flatMap { ["lib/wine/x86_64-windows/\($0)", "lib/wine/i386-windows/\($0)"] } + ["lib/wine/x86_64-unix/winemetal.so"]
+    static let dxmtFiles = ["d3d10core.dll", "d3d11.dll", "dxgi.dll", "winemetal.dll"]
+        .flatMap { ["lib/wine/x86_64-windows/\($0)", "lib/wine/i386-windows/\($0)"] }
+        + ["lib/wine/x86_64-windows/d3d12.dll", "lib/wine/x86_64-windows/d3d12core.dll", "lib/wine/x86_64-unix/winemetal.so"]
 
     /// The Wine runtime with DXMT applied, assembled once under Application Support (APFS clones, so no extra space).
     public static func url(dist: URL, cache: URL = Paths.runtimes) throws -> URL {
