@@ -208,6 +208,7 @@ public struct WindowsSteam: Sendable {
         process.standardOutput = output
         process.standardError = output
         try process.run()
+        RecentPrograms().record(program)
     }
 
     /// Whether any program runs in this runtime, Steam or not: Wine keeps a wineserver while one does.

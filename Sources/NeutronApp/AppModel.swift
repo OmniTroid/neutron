@@ -7,6 +7,7 @@ final class AppModel {
     var startingSteam = false
     var startingGame = false
     var errorMessage: String?
+    var recentGames = RecentPrograms().load()
     private var reported: Set<String> = []
     private var steam: Task<WindowsSteam, Error>?
 
@@ -76,9 +77,15 @@ final class AppModel {
             do {
                 let steam = try await client()
                 try await Task.detached(priority: .userInitiated) { try steam.launch(program: game) }.value
+                recentGames = RecentPrograms().load()
             } catch {
                 errorMessage = "Couldn't start \(game.lastPathComponent): \(error)"
             }
         }
+    }
+
+    func forget(game: URL) {
+        RecentPrograms().remove(game)
+        recentGames = RecentPrograms().load()
     }
 }

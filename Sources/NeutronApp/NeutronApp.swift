@@ -68,6 +68,10 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(model.startingGame)
+
+            if !model.recentGames.isEmpty {
+                RecentGamesView()
+            }
         }
         .controlSize(.extraLarge)
         .padding(32)
@@ -88,6 +92,46 @@ struct ContentView: View {
             Button("OK") { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "")
+        }
+    }
+}
+
+struct RecentGamesView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Recent Games")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(model.recentGames, id: \.path) { game in
+                        Button { model.load(game: game) } label: {
+                            VStack(alignment: .leading) {
+                                Text(game.deletingLastPathComponent().lastPathComponent)
+                                    .font(.body)
+                                Text(game.lastPathComponent)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.startingGame)
+                        .help(game.path)
+                        .contextMenu {
+                            Button("Remove from List") { model.forget(game: game) }
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 220)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
