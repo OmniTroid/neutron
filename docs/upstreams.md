@@ -5,8 +5,8 @@
 | Submodule | Upstream | In `main` | Checked |
 |---|---|---|---|
 | `external/wine` | [CodeWeavers' CrossOver sources](https://www.codeweavers.com/crossover/source) | `crossover-sources-26.3.0.tar.gz` (tag `crossover-26.3.0`) | 2026-10-30, newest published |
-| `external/dxmt` | [dttdrv/mullion](https://github.com/dttdrv/mullion) `main`, for D3D10 to 12, the shader converter, the core and winemetal | `695dbe2a` (2026-10-30), import commit `aaff4fdd` on branch `d3d12-import` | 2026-10-30, newest |
-| `external/dxmt` | [3Shain/dxmt](https://github.com/3Shain/dxmt) `main`, its base at `7c8dee1` (2026-09-16); merged up to `3b25259`, but the import's code won wherever both changed | | 2026-10-30 |
+| `external/dxmt` | [dttdrv/mullion](https://github.com/dttdrv/mullion) `main`, for D3D10 to 12, the shader converter, the core and winemetal | `992fc9e` (2026-11-02), import commit `cfbff640`; left out: the NGX signing certificate and its trust | 2026-11-02, newest |
+| `external/dxmt` | [3Shain/dxmt](https://github.com/3Shain/dxmt) `main`, its base at `7c8dee1`; reviewed up to `647b002`, and what the tree lacked ported by hand; its DXIL front end is not used | | 2026-11-02 |
 
 Both forks also carry patches from [Highball](https://github.com/gauthierpiarrette/highball) and our own, as commits on top.
 
@@ -14,27 +14,23 @@ Both forks also carry patches from [Highball](https://github.com/gauthierpiarret
 
 Bring upstream into a branch of the fork, test it, merge the PR, then bump the pin in Neutron (`git add external/<name>`) and update the table above.
 
-DXMT: each import is one commit on `d3d12-import`, the upstream tree renamed to DXMT's names.
+DXMT: clone the upstream into a temporary directory, rename it to DXMT's names, and compare it with what was last taken from it. Port the changes worth having as ordinary commits. No upstream stays as a remote or branch of the fork.
 
 ```sh
 cd external/dxmt
-git remote add dttdrv https://github.com/dttdrv/mullion.git   # once
-git fetch dttdrv
-mkdir import && git archive dttdrv/main | tar -x -C import
-cd import
-grep -rIl -i mullion . | xargs perl -pi -e 's#dttdrv/mullion#OmniTroid/dxmt#g; s/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g'
-find . -depth -iname '*mullion*' -execdir sh -c 'mv "$1" "$(echo "$1" | perl -pe "s/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g")"' _ {} \;
-cd ..
-export GIT_INDEX_FILE=$PWD/import.index
-git read-tree dttdrv/main && GIT_WORK_TREE=import git add -A . && tree=$(git write-tree)
-unset GIT_INDEX_FILE
-git branch -f d3d12-import "$(git commit-tree "$tree" -p d3d12-import -m "Import dttdrv/mullion $(git rev-parse --short dttdrv/main)")"
-git switch -c import-$(date +%Y%m%d) origin/main && git merge d3d12-import
-tests/d3d9/run.sh <wine-install>
-git push origin d3d12-import HEAD && gh pr create --base main
+tmp=$(mktemp -d)
+git clone https://github.com/dttdrv/mullion.git "$tmp/upstream"
+git -C "$tmp/upstream" log --oneline 992fc9e..HEAD    # the table's commit
+rm -rf "$tmp/upstream/.git"
+(cd "$tmp/upstream"
+ grep -rIl -i mullion . | xargs perl -pi -e 's#dttdrv/mullion#OmniTroid/dxmt#g; s/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g'
+ find . -depth -iname '*mullion*' | while read -r f; do mv "$f" "$(dirname "$f")/$(basename "$f" | perl -pe 's/mullion/dxmt/g; s/Mullion/DXMT/g; s/MULLION/DXMT/g')"; done)
+mkdir "$tmp/base" && git archive cfbff640 | tar -x -C "$tmp/base"
+git diff --no-index --stat "$tmp/base" "$tmp/upstream"
+git switch -c upstream-$(date +%Y%m%d) origin/main
 ```
 
-3Shain's newer commits come through that upstream, or by `git cherry-pick` of the ones it lacks.
+Test the ported commits with `tests/d3d9/run.sh <wine-install>`, open a PR with `gh pr create --base main`, and remove `$tmp`. Compare `3Shain/dxmt` the same way, from the commit in the table.
 
 Wine: each CrossOver release is imported as one commit on the `crossover` branch, whose tree is the tarball's `sources/` directory.
 
