@@ -10,7 +10,20 @@ final class AppModel {
     private var reported: Set<String> = []
     private var steam: Task<WindowsSteam, Error>?
 
-    /// Warns about anything not rendering with DXMT while the window is open.
+    private func log(fallbacks: [String]) {
+        let stamp = Date.now.ISO8601Format()
+        let lines = fallbacks.map { "\(stamp) \($0)\n" }.joined()
+        try? FileManager.default.createDirectory(at: Paths.fallbackLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let file = try? FileHandle(forWritingTo: Paths.fallbackLog) {
+            _ = try? file.seekToEnd()
+            try? file.write(contentsOf: Data(lines.utf8))
+            try? file.close()
+        } else {
+            try? Data(lines.utf8).write(to: Paths.fallbackLog)
+        }
+    }
+
+    /// Logs anything not rendering with DXMT while the window is open.
     func monitor() async {
         while !Task.isCancelled {
             guard let steam = try? await client() else { return }
@@ -18,7 +31,7 @@ final class AppModel {
             let new = (status?.fallbacks ?? []).map(\.description).filter { !reported.contains($0) }
             if !new.isEmpty {
                 reported.formUnion(new)
-                errorMessage = "Not rendering with DXMT:\n" + new.joined(separator: "\n")
+                log(fallbacks: new)
             }
             try? await Task.sleep(for: .seconds(6))
         }

@@ -15,6 +15,8 @@ public enum Paths {
     public static let runtimes = neutron.appending(path: "runtimes")
     /// The Wine prefix holding Valve's Windows Steam client.
     public static let steamPrefix = neutron.appending(path: "steam")
+    /// What the app found not rendering with DXMT.
+    public static let fallbackLog = home.appending(path: "Library/Logs/Neutron/fallbacks.log")
     public static let steam = steamPrefix.appending(path: "drive_c/Program Files (x86)/Steam")
     public static let steamAppInfo = steam.appending(path: "appcache/appinfo.vdf")
     public static let steamPackageInfo = steam.appending(path: "appcache/packageinfo.vdf")
