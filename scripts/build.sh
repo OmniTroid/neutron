@@ -134,6 +134,27 @@ find "$DIST/wine/lib/wine" -name '*.so' -exec strip -x {} + 2>/dev/null
 find "$DIST/wine/lib/wine" \( -name '*.dll' -o -name '*.exe' -o -name '*.drv' -o -name '*.sys' \) -print0 \
     | xargs -0 -n 200 x86_64-w64-mingw32-strip --strip-debug 2>/dev/null || true
 
+# the loader again as an app in the games category, which macOS needs to give a game Game Mode
+WINE_APP="$DIST/wine/lib/wine/x86_64-unix/wine.app/Contents"
+mkdir -p "$WINE_APP/MacOS"
+cp "$DIST/wine/lib/wine/x86_64-unix/wine" "$WINE_APP/MacOS/wine"
+cat > "$WINE_APP/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>wine</string>
+    <key>CFBundleIdentifier</key><string>dev.neutron.wine</string>
+    <key>CFBundleName</key><string>wine</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>NSPrincipalClass</key><string>WineApplication</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
+    <key>LSSupportsGameMode</key><true/>
+    <key>LSUIElement</key><string>1</string>
+</dict>
+</plist>
+PLIST
+
 DXMT="$DIST/overlays/dxmt/lib/wine"
 mkdir -p "$DXMT"
 cp -R "$B/dxmt-install/"*-windows "$B/dxmt-install/x86_64-unix" "$DXMT/"

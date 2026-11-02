@@ -8,9 +8,22 @@ final class AppModel {
     var startingGame = false
     var errorMessage: String?
     private var reported: Set<String> = []
-    private var steam: WindowsSteam?
+    private var steam: Task<WindowsSteam, Error>?
 
-    /// Warns about anything not rendering with DXMT while the window is open.
+    private func log(fallbacks: [String]) {
+        let stamp = Date.now.ISO8601Format()
+        let lines = fallbacks.map { "\(stamp) \($0)\n" }.joined()
+        try? FileManager.default.createDirectory(at: Paths.fallbackLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let file = try? FileHandle(forWritingTo: Paths.fallbackLog) {
+            _ = try? file.seekToEnd()
+            try? file.write(contentsOf: Data(lines.utf8))
+            try? file.close()
+        } else {
+            try? Data(lines.utf8).write(to: Paths.fallbackLog)
+        }
+    }
+
+    /// Logs anything not rendering with DXMT while the window is open.
     func monitor() async {
         while !Task.isCancelled {
             guard let steam = try? await client() else { return }
@@ -18,18 +31,23 @@ final class AppModel {
             let new = (status?.fallbacks ?? []).map(\.description).filter { !reported.contains($0) }
             if !new.isEmpty {
                 reported.formUnion(new)
-                errorMessage = "Not rendering with DXMT:\n" + new.joined(separator: "\n")
+                log(fallbacks: new)
             }
             try? await Task.sleep(for: .seconds(6))
         }
     }
 
     private func client() async throws -> WindowsSteam {
-        if let steam { return steam }
-        // the first call assembles the runtime, which copies files
-        let steam = try await Task.detached(priority: .userInitiated) { try WindowsSteam() }.value
+        // the first call assembles the runtime, which copies files: everything that asks at startup shares it
+        if let steam { return try await steam.value }
+        let steam = Task.detached(priority: .userInitiated) { try WindowsSteam() }
         self.steam = steam
-        return steam
+        do {
+            return try await steam.value
+        } catch {
+            self.steam = nil
+            throw error
+        }
     }
 
     func launchSteam() {
@@ -56,9 +74,8 @@ final class AppModel {
             let access = game.startAccessingSecurityScopedResource()
             defer { if access { game.stopAccessingSecurityScopedResource() } }
             do {
-                try await Task.detached(priority: .userInitiated) {
-                    try WindowsSteam(prefix: Paths.gamesPrefix).launch(program: game)
-                }.value
+                let steam = try await client()
+                try await Task.detached(priority: .userInitiated) { try steam.launch(program: game) }.value
             } catch {
                 errorMessage = "Couldn't start \(game.lastPathComponent): \(error)"
             }

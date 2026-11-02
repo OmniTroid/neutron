@@ -13,7 +13,7 @@ public enum GraphicsCheck {
 
     static let dxmtLibraries: Set<String> = ["d3d9.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll"]
 
-    static let steamProbes: Set<String> = ["steamwebhelper.exe", "steamsysinfo.exe", "vulkandriverquery.exe", "vulkandriverquery64.exe"]
+    static let probes: Set<String> = ["epicwebhelper.exe", "steamwebhelper.exe", "steamsysinfo.exe", "vulkandriverquery.exe", "vulkandriverquery64.exe"]
 
     static func reason(library: String, native: Bool, wow64: Bool = false) -> String? {
         switch library {
@@ -52,8 +52,8 @@ public enum GraphicsCheck {
                 continue
             }
             // Chromium's GPU info process probes Direct3D 12 and exits; Steam's fallback shows in its own logs instead.
-            // Steam's other helpers only ask what Vulkan there is
-            guard !steamProbes.contains(processes[pid] ?? ""),
+            // Steam's other helpers, and Unreal's embedded browser, only ask what Vulkan there is
+            guard !probes.contains(processes[pid] ?? ""),
                   let reason = reason(library: library, native: line.hasSuffix(": native"), wow64: path.lowercased().contains("syswow64")) else { continue }
             let fallback = Fallback(process: processes[pid] ?? "process \(pid)", what: library, reason: reason)
             if line.contains("Unloaded module") {

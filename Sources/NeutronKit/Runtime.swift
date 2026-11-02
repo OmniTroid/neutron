@@ -22,14 +22,20 @@ public enum Runtime {
 
     static func assemble(base: URL, overlay: URL, into target: URL) throws -> URL {
         let fm = FileManager.default
+        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // the app and the CLI, or two of the app's tasks, may ask at once: a second replacing the first's runtime
+        // leaves it without the wine it was about to start
+        let lock = open(target.deletingLastPathComponent().appending(path: ".assemble-lock").path, O_CREAT | O_RDWR, 0o644)
+        guard lock >= 0, flock(lock, LOCK_EX) == 0 else { throw NeutronError("Couldn't lock the runtime to assemble it") }
+        defer { close(lock) }
         let stamp = try fingerprint(base: base, overlay: overlay)
         let stampURL = target.appending(path: ".neutron-runtime")
-        if (try? String(contentsOf: stampURL, encoding: .utf8)) == stamp { return target }
+        if (try? String(contentsOf: stampURL, encoding: .utf8)) == stamp,
+           fm.fileExists(atPath: target.appending(path: "bin/wine").path) { return target }
         // replacing files under a running wineserver breaks every process it starts afterwards
-        if fm.fileExists(atPath: target.path),
+        if fm.fileExists(atPath: target.appending(path: "bin/wine").path),
            WindowsSteam.processCommandLines().contains(where: { $0.contains(target.path + "/") }) { return target }
 
-        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         let staging = target.deletingLastPathComponent().appending(path: ".\(target.lastPathComponent)-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: staging) }
         try fm.copyItem(at: base, to: staging)

@@ -59,6 +59,24 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>Windows Program</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>com.microsoft.windows-executable</string></array>
+        </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.microsoft.windows-executable</string>
+            <key>UTTypeDescription</key><string>Windows Program</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>exe</string></array></dict>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF
@@ -88,6 +106,8 @@ find "$APP/Contents/SharedSupport" -type f -print0 | while IFS= read -r -d '' fi
         "${SIGN[@]}" "$file" 2>&1 | grep -v "replacing existing signature" || true
     fi
 done
+# its Info.plist has to be sealed with the loader in it, or macOS kills the loader
+"${SIGN[@]}" "$APP/Contents/SharedSupport/dist/wine/lib/wine/x86_64-unix/wine.app"
 "${SIGN[@]}" "$APP/Contents/Helpers/neutron"
 "${SIGN[@]}" "$APP"
 codesign --verify --strict --deep "$APP"

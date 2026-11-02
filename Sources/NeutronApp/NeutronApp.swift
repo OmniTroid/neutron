@@ -22,12 +22,36 @@ struct NeutronApp: App {
         .commands {
             CheckForUpdatesCommand(updater: updater)
         }
+        Settings {
+            SettingsView()
+        }
+    }
+}
+
+struct SettingsView: View {
+    var body: some View {
+        Form {
+            LabeledContent("Wine prefix") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(Paths.steamPrefix.path)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open in Finder") {
+                        try? FileManager.default.createDirectory(at: Paths.steamPrefix, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(Paths.steamPrefix)
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
     }
 }
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @State private var choosingGame = false
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 12) {
@@ -54,6 +78,7 @@ struct ContentView: View {
             case .failure(let error): model.errorMessage = "Couldn't open the file: \(error.localizedDescription)"
             }
         }
+        .onOpenURL { model.load(game: $0) }
         .task { await model.monitor() }
         #if DEBUG
         .task { await debugSnapshot() }
@@ -71,6 +96,9 @@ struct ContentView: View {
 extension ContentView {
     /// NEUTRON_SNAPSHOT=<png>: render the window to a PNG and quit, for design review.
     func debugSnapshot() async {
+        if ProcessInfo.processInfo.environment["NEUTRON_SHOW_SETTINGS"] != nil {
+            openSettings()
+        }
         guard let path = ProcessInfo.processInfo.environment["NEUTRON_SNAPSHOT"] else { return }
         try? await Task.sleep(for: .seconds(1))
         guard let window = NSApp.windows.first(where: \.isVisible), let view = window.contentView,

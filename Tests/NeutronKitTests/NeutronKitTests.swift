@@ -120,6 +120,21 @@ struct InstallSizeTests {
 }
 
 struct RuntimeTests {
+    @Test func rebuildsARuntimeWithoutWine() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let base = root.appending(path: "base"), overlay = root.appending(path: "overlay"), target = root.appending(path: "cache/dxmt")
+        try fm.createDirectory(at: base.appending(path: "bin"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: overlay.appending(path: "lib"), withIntermediateDirectories: true)
+        try "wine".write(to: base.appending(path: "bin/wine"), atomically: true, encoding: .utf8)
+        try "dll".write(to: overlay.appending(path: "lib/a.dll"), atomically: true, encoding: .utf8)
+        _ = try Runtime.assemble(base: base, overlay: overlay, into: target)
+        try fm.removeItem(at: target.appending(path: "bin/wine"))
+        _ = try Runtime.assemble(base: base, overlay: overlay, into: target)
+        #expect(fm.fileExists(atPath: target.appending(path: "bin/wine").path))
+    }
+
     @Test func assemblesOverlayOntoBase() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appending(path: UUID().uuidString)
@@ -265,6 +280,19 @@ struct GraphicsCheckTests {
         let fallbacks = GraphicsCheck.fallbacks(inLog: log)
         #expect(fallbacks.map(\.process) == ["old.exe", "game.exe", "vulkan.exe", "old32.exe", "vk.exe", "DXMT"])
         #expect(fallbacks.map(\.what).prefix(5) == ["wined3d.dll", "dxgi.dll", "winevulkan.dll", "d3d12.dll", "d3d12core.dll"])
+    }
+
+    @Test func leavesUnrealsBrowserHelperAlone() {
+        let log = #"""
+        0020:0024:trace:loaddll:build_module Loaded L"C:\\Games\\Engine\\EpicWebHelper.exe" at 140000000: native
+        0020:0024:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\winevulkan.dll" at 6FFFE6ED0000: builtin
+        """#
+        #expect(GraphicsCheck.fallbacks(inLog: log).isEmpty)
+    }
+
+    @Test func findsTheRuntimesWineserver() {
+        #expect(WindowsSteam.isServer("/runtime/dxmt/lib/wine/../../bin/wineserver", of: "/runtime/dxmt"))
+        #expect(!WindowsSteam.isServer("/other/wine/bin/wineserver", of: "/runtime/dxmt"))
     }
 
     @Test func flagsSteamSoftwareRendering() {
