@@ -38,11 +38,11 @@ struct Start: AsyncParsableCommand {
 }
 
 struct Run: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Run a Windows program from outside Steam, in a prefix of its own.")
+    static let configuration = CommandConfiguration(abstract: "Run a Windows program from outside Steam.")
     @Argument(help: "The .exe file.") var program: String
 
     func run() throws {
-        try WindowsSteam(prefix: Paths.gamesPrefix).launch(program: URL(filePath: program).standardizedFileURL)
+        try WindowsSteam().launch(program: URL(filePath: program).standardizedFileURL)
     }
 }
 

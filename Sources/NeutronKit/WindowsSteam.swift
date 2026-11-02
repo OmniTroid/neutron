@@ -17,6 +17,8 @@ public struct WindowsSteam: Sendable {
     var steamExe: URL { prefix.appending(path: "drive_c/Program Files (x86)/Steam/steam.exe") }
     /// Wine's output for the client and every game it starts.
     public var log: URL { prefix.appending(path: "neutron.log") }
+    /// Wine's output for the last program started from outside Steam.
+    public var programLog: URL { prefix.appending(path: "neutron-program.log") }
     public var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = prefix.path
@@ -139,7 +141,7 @@ public struct WindowsSteam: Sendable {
     public func fallbacks() -> [GraphicsCheck.Fallback] {
         func read(_ url: URL) -> String { (try? String(contentsOf: url, encoding: .utf8)) ?? "" }
         let logs = steamExe.deletingLastPathComponent().appending(path: "logs")
-        return GraphicsCheck.fallbacks(inLog: read(log))
+        return GraphicsCheck.fallbacks(inLog: read(log) + read(programLog))
             + GraphicsCheck.steamBrowserFallbacks(webhelperLog: read(logs.appending(path: "webhelper.txt")),
                                                   cefLog: read(logs.appending(path: "cef_log.txt")))
     }
@@ -194,8 +196,8 @@ public struct WindowsSteam: Sendable {
     /// Runs a Windows program of the user's choosing in this prefix, from its own directory.
     public func launch(program: URL) throws {
         try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: log.path, contents: nil)
-        let output = try FileHandle(forWritingTo: log)
+        FileManager.default.createFile(atPath: programLog.path, contents: nil)
+        let output = try FileHandle(forWritingTo: programLog)
         let process = Process()
         process.executableURL = wine
         process.arguments = [program.path]

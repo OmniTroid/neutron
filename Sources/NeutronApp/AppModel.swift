@@ -56,9 +56,8 @@ final class AppModel {
             let access = game.startAccessingSecurityScopedResource()
             defer { if access { game.stopAccessingSecurityScopedResource() } }
             do {
-                try await Task.detached(priority: .userInitiated) {
-                    try WindowsSteam(prefix: Paths.gamesPrefix).launch(program: game)
-                }.value
+                let steam = try await client()
+                try await Task.detached(priority: .userInitiated) { try steam.launch(program: game) }.value
             } catch {
                 errorMessage = "Couldn't start \(game.lastPathComponent): \(error)"
             }
