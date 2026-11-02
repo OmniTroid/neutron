@@ -212,8 +212,13 @@ public struct WindowsSteam: Sendable {
 
     /// Whether any program runs in this runtime, Steam or not: Wine keeps a wineserver while one does.
     func sessionRunning() -> Bool {
-        let server = wine.deletingLastPathComponent().appending(path: "wineserver").path
-        return Self.processCommandLines().contains { $0.hasPrefix(server) }
+        let root = wine.deletingLastPathComponent().deletingLastPathComponent().path
+        return Self.processCommandLines().contains { Self.isServer($0, of: root) }
+    }
+
+    /// Wine starts it through a path of its own, such as `lib/wine/../../bin/wineserver`.
+    static func isServer(_ commandLine: String, of root: String) -> Bool {
+        commandLine.hasPrefix(root + "/") && commandLine.contains("/bin/wineserver")
     }
 
     /// The UI process the client starts once it is past its updater.

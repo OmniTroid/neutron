@@ -275,6 +275,11 @@ struct GraphicsCheckTests {
         #expect(GraphicsCheck.fallbacks(inLog: log).isEmpty)
     }
 
+    @Test func findsTheRuntimesWineserver() {
+        #expect(WindowsSteam.isServer("/runtime/dxmt/lib/wine/../../bin/wineserver", of: "/runtime/dxmt"))
+        #expect(!WindowsSteam.isServer("/other/wine/bin/wineserver", of: "/runtime/dxmt"))
+    }
+
     @Test func flagsSteamSoftwareRendering() {
         let old = "[2026-10-30 10:00:00] Startup - webhelper launched pid: 1\n[2026-10-30 10:00:01] Disabling GPU acceleration due to --disable-gpu (browser)\n"
         let current = "[2026-10-30 11:00:00] Startup - webhelper launched pid: 2\n[2026-10-30 11:00:01] Starting message loop\n"
