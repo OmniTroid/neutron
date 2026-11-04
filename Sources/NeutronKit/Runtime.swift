@@ -57,7 +57,8 @@ public enum Runtime {
 
     /// Changes whenever the bundled base or overlay changes, e.g. after an app update.
     static func fingerprint(base: URL, overlay: URL) throws -> String {
-        var lines = [base.path, describe(base.appending(path: "lib/wine/x86_64-unix/ntdll.so"))]
+        var lines = [base.path]
+        lines += try files(in: base).map { "\($0) \(describe(base.appending(path: $0)))" }
         lines += try files(in: overlay).map { "\($0) \(describe(overlay.appending(path: $0)))" }
         return lines.joined(separator: "\n")
     }
