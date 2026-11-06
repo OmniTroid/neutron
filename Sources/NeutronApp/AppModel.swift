@@ -7,6 +7,18 @@ final class AppModel {
     var startingSteam = false
     var startingGame = false
     var errorMessage: String?
+    var status = WindowsSteam.Status(running: false, signedIn: false)
+    /// The name Steam knows the running game by, looked up once per app ID.
+    var runningGameName: String?
+    private var namedAppID: UInt32?
+    /// Owned Windows games and their install state, read from the client's caches.
+    var games: [SteamGame] = []
+    var states: [UInt32: AppState] = [:]
+    var loadingLibrary = true
+    var search = ""
+    /// Games asked to start or install, until Steam reports back.
+    var pending: Set<UInt32> = []
+    private var libraryAccount: String?
     var recentGames = RecentPrograms().load()
     private var reported: Set<String> = []
     private var steam: Task<WindowsSteam, Error>?
@@ -29,12 +41,106 @@ final class AppModel {
         while !Task.isCancelled {
             guard let steam = try? await client() else { return }
             let status = await Task.detached(priority: .utility) { try? steam.status() }.value
+            if let status, status != self.status {
+                self.status = status
+                await name(runningApp: status.runningAppID)
+            }
+            await refreshLibrary()
             let new = (status?.fallbacks ?? []).map(\.description).filter { !reported.contains($0) }
             if !new.isEmpty {
                 reported.formUnion(new)
                 log(fallbacks: new)
             }
             try? await Task.sleep(for: .seconds(6))
+        }
+    }
+
+    private func name(runningApp appID: UInt32?) async {
+        guard appID != namedAppID else { return }
+        namedAppID = appID
+        guard let appID else { runningGameName = nil; return }
+        runningGameName = await Task.detached(priority: .utility) {
+            (try? AppInfo.read(appID: appID))?["common"]?["name"]?.text
+                ?? CompatDB.shared?.entry(appID: appID)?.title
+        }.value
+    }
+
+    /// Reads the owned games once per signed-in account, and install states on every pass.
+    func refreshLibrary() async {
+        let account = status.signedIn ? status.account ?? "" : nil
+        let reloadGames = games.isEmpty || account != libraryAccount
+        let (games, states) = await Task.detached(priority: .utility) {
+            (reloadGames ? try? SteamLibrary.games() : nil, SteamApps.states())
+        }.value
+        if let games, !games.isEmpty || account != nil {
+            self.games = games
+            libraryAccount = account
+        }
+        if states != self.states { self.states = states }
+        loadingLibrary = false
+        if let running = status.runningAppID { pending.remove(running) }
+        pending.subtract(states.filter { $0.value.updating }.keys)
+    }
+
+    var installedGames: [SteamGame] { filtered.filter { states[$0.appID]?.installed == true || states[$0.appID]?.updating == true } }
+    var otherGames: [SteamGame] { filtered.filter { states[$0.appID] == nil } }
+
+    private var filtered: [SteamGame] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        return query.isEmpty ? games : games.filter { $0.name.localizedStandardContains(query) }
+    }
+
+    /// Starts an installed game, starting Steam first when it isn't running.
+    func play(_ game: SteamGame) {
+        steamAction(game, verb: "start") { try $0.launch(appID: game.appID) }
+    }
+
+    /// Opens Steam's install dialog, where the user picks the drive and confirms.
+    func install(_ game: SteamGame) {
+        if let entry = CompatDB.shared?.entry(appID: game.appID), entry.blocked {
+            errorMessage = "\(game.name) is listed as not working on Neutron\(entry.summary.map { ": \($0)" } ?? ".") Install it from Steam's window to try anyway."
+            return
+        }
+        steamAction(game, verb: "install") { try $0.install(appID: game.appID) }
+    }
+
+    func uninstall(_ game: SteamGame) {
+        steamAction(game, verb: "uninstall", track: false) { try $0.uninstall(appID: game.appID) }
+    }
+
+    func showInSteam(_ game: SteamGame) {
+        steamAction(game, verb: "show", track: false) { try $0.open("steam://nav/games/details/\(game.appID)") }
+    }
+
+    func revealInstall(_ game: SteamGame) {
+        guard let dir = states[game.appID]?.directory else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
+    }
+
+    private func steamAction(_ game: SteamGame, verb: String, track: Bool = true,
+                             _ action: @escaping @Sendable (WindowsSteam) throws -> Void) {
+        if track { pending.insert(game.appID) }
+        Task {
+            do {
+                let steam = try await client()
+                if !status.running {
+                    startingSteam = true
+                    defer { startingSteam = false }
+                    try await steam.start()
+                }
+                try await Task.detached(priority: .userInitiated) { try action(steam) }.value
+                // Steam's dialogs only show while Wine is the active app
+                if !track || verb == "install", let pid = await Task.detached(operation: { steam.windowProcessID() }).value {
+                    NSRunningApplication(processIdentifier: pid)?.activate()
+                }
+            } catch {
+                errorMessage = "Couldn't \(verb) \(game.name): \(error)"
+            }
+            if track {
+                // a launch that never shows up in Steam's state shouldn't spin forever
+                try? await Task.sleep(for: .seconds(45))
+                pending.remove(game.appID)
+            }
         }
     }
 
