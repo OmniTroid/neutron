@@ -18,7 +18,7 @@ struct NeutronApp: App {
             ContentView()
                 .environment(model)
         }
-        .windowResizability(.contentSize)
+        .defaultSize(width: 940, height: 680)
         .commands {
             CheckForUpdatesCommand(updater: updater)
         }
@@ -54,28 +54,39 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        VStack(spacing: 12) {
-            Button { model.launchSteam() } label: {
-                Label(model.startingSteam ? "Starting Steam…" : "Launch Steam", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(model.startingSteam)
+        @Bindable var model = model
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                HeaderView()
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
+                SearchField(text: $model.search)
+                    .frame(minWidth: 120, maxWidth: 220)
+                Button { choosingGame = true } label: {
+                    Label(model.startingGame ? "Starting…" : "Open Other Game…", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut("o")
+                .disabled(model.startingGame)
+                .help("Run a Windows program that isn't in Steam")
+                .fixedSize()
 
-            Button { choosingGame = true } label: {
-                Label(model.startingGame ? "Starting…" : "Load Other Game…", systemImage: "folder")
-                    .frame(maxWidth: .infinity)
+                Button { model.launchSteam() } label: {
+                    Label(steamButtonTitle, systemImage: model.status.running ? "macwindow" : "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.startingSteam)
+                .fixedSize()
             }
-            .buttonStyle(.bordered)
-            .disabled(model.startingGame)
+            .controlSize(.large)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
 
-            if !model.recentGames.isEmpty {
-                RecentGamesView()
-            }
+            Divider()
+
+            LibraryView()
         }
-        .controlSize(.extraLarge)
-        .padding(32)
-        .frame(width: 360)
+        .frame(minWidth: 760, minHeight: 480)
         .fileImporter(isPresented: $choosingGame, allowedContentTypes: [UTType(filenameExtension: "exe") ?? .data]) { result in
             switch result {
             case .success(let game): model.load(game: game)
@@ -94,44 +105,140 @@ struct ContentView: View {
             Text(model.errorMessage ?? "")
         }
     }
+
+    private var steamButtonTitle: String {
+        if model.startingSteam { return "Starting Steam…" }
+        return model.status.running ? "Show Steam" : "Launch Steam"
+    }
+}
+
+struct SearchField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search", text: $text)
+                .textFieldStyle(.plain)
+                .focused($focused)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+        .background {
+            Button("") { focused = true }.keyboardShortcut("f").hidden()
+        }
+        // macOS focuses the first text field in a new window; the library is what's wanted first
+        .task { focused = false }
+    }
+}
+
+/// The app's name and one line on what Steam is doing.
+struct HeaderView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Neutron")
+                    .font(.headline)
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 7, height: 7)
+                    Text(statusText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize()
+                }
+                .animation(.default, value: statusText)
+            }
+        }
+    }
+
+    private var statusText: String {
+        let status = model.status
+        if model.startingSteam && !status.running { return "Starting Steam…" }
+        guard status.running else { return "Steam isn't running" }
+        if status.runningAppID != nil { return "Playing \(model.runningGameName ?? "a game")" }
+        guard status.signedIn else { return "Steam is running · not signed in" }
+        return status.account.map { "Signed in as \($0)" } ?? "Signed in"
+    }
+
+    /// Green while something runs, grey otherwise: colour only for state.
+    private var dotColor: Color {
+        let status = model.status
+        if status.runningAppID != nil || status.signedIn { return .green }
+        if status.running || model.startingSteam { return .orange }
+        return Color.secondary.opacity(0.5)
+    }
 }
 
 struct RecentGamesView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Recent Games")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-            ScrollView {
-                VStack(spacing: 2) {
-                    ForEach(model.recentGames, id: \.path) { game in
-                        Button { model.load(game: game) } label: {
-                            VStack(alignment: .leading) {
-                                Text(game.deletingLastPathComponent().lastPathComponent)
-                                    .font(.body)
-                                Text(game.lastPathComponent)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(model.startingGame)
-                        .help(game.path)
-                        .contextMenu {
-                            Button("Remove from List") { model.forget(game: game) }
-                        }
-                    }
+        VStack(spacing: 0) {
+            ForEach(model.recentGames, id: \.path) { game in
+                RecentGameRow(game: game)
+                if game != model.recentGames.last {
+                    Divider().padding(.leading, 44)
                 }
             }
-            .frame(maxHeight: 220)
-            .fixedSize(horizontal: false, vertical: true)
+        }
+        .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct RecentGameRow: View {
+    @Environment(AppModel.self) private var model
+    let game: URL
+    @State private var hovering = false
+
+    var body: some View {
+        Button { model.load(game: game) } label: {
+            HStack(spacing: 10) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: game.path))
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(game.deletingLastPathComponent().lastPathComponent)
+                        .font(.body)
+                    Text(game.lastPathComponent)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "play.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .opacity(hovering ? 1 : 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .background(hovering ? Color.primary.opacity(0.05) : .clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .disabled(model.startingGame)
+        .help(game.path)
+        .contextMenu {
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([game]) }
+            Button("Remove from List") { model.forget(game: game) }
         }
     }
 }
